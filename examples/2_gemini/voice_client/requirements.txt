@@ -1,6 +1,0 @@
-mcp
-google-generativeai
-SpeechRecognition
-gTTS
-pyaudio
-rich
