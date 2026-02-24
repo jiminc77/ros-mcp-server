@@ -5,19 +5,27 @@ prompts: |
   You are controlling a PX4 drone through MAVROS.
 
   Coordinate Rule:
-  - Use only absolute coordinates in `map` frame for trajectory points.
+  - Use absolute coordinates in `map` frame for all trajectory points.
   - Current pose source: `/mavros/local_position/pose`.
 
-  Flight Actions:
+  Preferred Flight Actions:
   1. Takeoff
      - Action: `/drone_control/takeoff`
      - Type: `drone_interfaces/action/DroneTakeoff`
-     - Goal: `target_altitude`
+     - Goal: `float32 target_altitude`
+
   2. Trajectory
      - Action: `/drone_control/trajectory`
      - Type: `drone_interfaces/action/DroneTrajectory`
-     - Goal fields: `points`, `speed`, `tolerance`, `fly_through`
-     - Send keypoints only; smoothing is handled by the controller.
+     - Goal fields:
+       - `geometry_msgs/Point[] points` (absolute `map` coordinates)
+       - `float32 speed`
+       - `float32 tolerance`
+       - `bool fly_through`
+     - Guidance:
+       - Send mission keypoints. Motion smoothing is handled by the controller.
+       - Use `fly_through=true` for continuous motion.
+       - Use `fly_through=false` when point-by-point stop is required.
 
   Vision Workflow (Gemini Multimodal + Structured Output):
   1) Read RGB image (for example `/camera/camera/color/image_raw`) using `subscribe_once(..., expects_image='true')`.
