@@ -57,7 +57,7 @@ source install/setup.bash
 ros2 run drone_controller bridge
 ```
 
-### 5. (Optional) Launch Perception Node for D455 BBox Projection
+### 5. (Optional) Launch Perception Node for BBox Projection
 This starts `/drone_perception/project_bbox_to_3d`.
 
 ```bash
@@ -67,10 +67,6 @@ ros2 launch drone_perception realsense_grounding.launch.py
 ```
 
 Vision detection itself is handled by Gemini multimodal (via image tools), then the detected bbox is projected to 3D map coordinates through the ROS service.
-The projection node uses averaged depth from recent frames (default history size is 5) for more stable grounding.
-Service/action results use message prefixes for fast parsing:
-- failures: `E_*`
-- success: `OK_*`
 
 Recommended structured output from Gemini detection step:
 
@@ -111,4 +107,3 @@ The actions and commands are identical to the simulation example. Please refer t
 
 ## Coordinate Rule
 - All flight waypoints must be absolute coordinates in `map` frame.
-- Do not mix relative and absolute waypoint conventions in the same mission.

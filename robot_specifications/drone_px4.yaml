@@ -12,16 +12,16 @@ prompts: |
   1. Takeoff
      - Action: `/drone_control/takeoff`
      - Type: `drone_interfaces/action/DroneTakeoff`
-     - Goal: `float32 target_altitude`
+     - Goal: `target_altitude`
 
   2. Trajectory
      - Action: `/drone_control/trajectory`
      - Type: `drone_interfaces/action/DroneTrajectory`
      - Goal fields:
        - `geometry_msgs/Point[] points` (absolute `map` coordinates)
-       - `float32 speed`
-       - `float32 tolerance`
-       - `bool fly_through`
+       - `speed`
+       - `tolerance`
+       - `fly_through`
      - Guidance:
        - Send mission keypoints. Motion smoothing is handled by the controller.
        - Use `fly_through=true` for continuous motion.

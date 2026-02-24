@@ -155,4 +155,3 @@ The `drone_controller` node exposes these high-level actions:
 
 ### Coordinate Rule
 - Use absolute `map` frame coordinates for trajectory points.
-- Do not mix relative and absolute waypoint conventions.
