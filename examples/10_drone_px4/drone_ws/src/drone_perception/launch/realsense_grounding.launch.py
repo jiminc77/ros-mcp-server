@@ -1,0 +1,46 @@
+import os
+
+from ament_index_python.packages import get_package_share_directory
+from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.conditions import IfCondition
+from launch.launch_description_sources import AnyLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
+
+
+def generate_launch_description():
+    start_realsense = LaunchConfiguration("start_realsense")
+
+    start_realsense_arg = DeclareLaunchArgument(
+        "start_realsense",
+        default_value="true",
+        description="Start realsense2_camera with depth-color alignment",
+    )
+
+    realsense_launch = IncludeLaunchDescription(
+        AnyLaunchDescriptionSource(
+            os.path.join(
+                get_package_share_directory("realsense2_camera"),
+                "launch",
+                "rs_launch.py",
+            )
+        ),
+        launch_arguments={"align_depth.enable": "true"}.items(),
+        condition=IfCondition(start_realsense),
+    )
+
+    grounding_node = Node(
+        package="drone_perception",
+        executable="object_grounding",
+        name="object_grounding",
+        output="screen",
+        parameters=[
+            {"color_topic": "/camera/camera/color/image_raw"},
+            {"depth_topic": "/camera/camera/aligned_depth_to_color/image_raw"},
+            {"camera_info_topic": "/camera/camera/color/camera_info"},
+            {"map_frame": "map"},
+        ],
+    )
+
+    return LaunchDescription([start_realsense_arg, realsense_launch, grounding_node])

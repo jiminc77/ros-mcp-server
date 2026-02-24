@@ -1,0 +1,10 @@
+# Request
+string color
+string shape
+---
+# Response
+bool success
+string message
+geometry_msgs/Point position
+float32 confidence
+string frame_id

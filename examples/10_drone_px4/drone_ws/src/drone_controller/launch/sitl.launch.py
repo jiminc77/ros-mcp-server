@@ -1,11 +1,20 @@
-from launch_ros.actions import Node
-
 from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition
+from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
 
 
 def generate_launch_description():
+    use_perception = LaunchConfiguration("use_perception")
+
     return LaunchDescription(
         [
+            DeclareLaunchArgument(
+                "use_perception",
+                default_value="false",
+                description="Launch static object grounding service node",
+            ),
             # 1. Start Simulated Drone (PX4 SITL) - User usually runs this manually, but we can try?
             # Actually standard practice is user runs 'make px4_sitl' in another term.
             # But we can launch MAVROS.
@@ -28,6 +37,18 @@ def generate_launch_description():
                 executable="bridge",
                 output="screen",
                 parameters=[{"use_sim_time": True}],
+            ),
+            Node(
+                package="drone_perception",
+                executable="object_grounding",
+                output="screen",
+                condition=IfCondition(use_perception),
+                parameters=[
+                    {"color_topic": "/camera/camera/color/image_raw"},
+                    {"depth_topic": "/camera/camera/aligned_depth_to_color/image_raw"},
+                    {"camera_info_topic": "/camera/camera/color/camera_info"},
+                    {"map_frame": "map"},
+                ],
             ),
         ]
     )

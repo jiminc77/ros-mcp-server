@@ -136,7 +136,7 @@ The `drone_controller` node exposes these high-level actions:
 
 ### **Features**
 -   **Smoothed 50Hz Control Loop**: Updates at 50Hz for responsive control.
--   **Setpoint Interpolation**: "Carrot-following" logic eliminates jerkiness by moving a virtual setpoint at constant speed.
+-   **Setpoint Interpolation**: Virtual setpoint smoothing with fixed acceleration profile.
 -   **Fly Through Mode**: Smoothly transitions between waypoints without stopping.
 
 ### **Actions**
@@ -152,3 +152,7 @@ The `drone_controller` node exposes these high-level actions:
         -   `float32 speed` (m/s, default 1.0)
         -   `float32 tolerance` (Arrival radius)
         -   `bool fly_through` (True = Continuous motion)
+
+### Coordinate Rule
+- Use absolute `map` frame coordinates for trajectory points.
+- Do not mix relative and absolute waypoint conventions.

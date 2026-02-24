@@ -57,7 +57,16 @@ source install/setup.bash
 ros2 run drone_controller bridge
 ```
 
-### 4. (Optional) Launch Motion Capture Node
+### 5. (Optional) Launch Perception Node for D455 Grounding
+This starts static object grounding service (`/drone_perception/get_object_3d`) using RealSense color+depth streams.
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+ros2 launch drone_perception realsense_grounding.launch.py
+```
+
+### 6. (Optional) Launch Motion Capture Node
 Reference
 - Computer Vision (Optical Flow, MoCap, VIO, Avoidance) https://docs.px4.io/main/en/advanced/computer_vision
 - Using Vision or Motion Capture Systems for Position Estimation https://docs.px4.io/main/en/ros/external_position_estimation
@@ -80,3 +89,7 @@ ros2 launch rosbridge_server rosbridge_websocket_launch.xml
 
 ## Available Actions
 The actions and commands are identical to the simulation example. Please refer to `../gazebo_sim/README.md` or the robot specification for details.
+
+## Coordinate Rule
+- All flight waypoints must be absolute coordinates in `map` frame.
+- Do not mix relative and absolute waypoint conventions in the same mission.
