@@ -18,13 +18,12 @@ setup(
     zip_safe=True,
     maintainer="husl-ai",
     maintainer_email="husl-ai@todo.todo",
-    description="Drone perception tools for pixel-to-3D projection",
+    description="Drone perception tools for bbox-to-3D projection",
     license="TODO: License declaration",
     extras_require={"test": ["pytest"]},
     entry_points={
         "console_scripts": [
-            "pixel_projection = drone_perception.object_grounding_node:main",
-            "debug_view = drone_perception.debug_view_node:main",
+            "bbox_projection = drone_perception.object_grounding_node:main",
         ],
     },
 )

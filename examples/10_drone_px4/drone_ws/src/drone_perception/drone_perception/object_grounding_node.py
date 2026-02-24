@@ -4,7 +4,6 @@ import numpy as np
 import rclpy
 from cv_bridge import CvBridge
 from drone_interfaces.srv import ProjectBBoxTo3D
-from drone_interfaces.srv import ProjectPixelTo3D
 from rclpy.duration import Duration
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
@@ -13,9 +12,9 @@ from sensor_msgs.msg import CameraInfo, Image
 from tf2_ros import Buffer, TransformException, TransformListener
 
 
-class PixelProjectionNode(Node):
+class BBoxProjectionNode(Node):
     def __init__(self):
-        super().__init__("pixel_projection")
+        super().__init__("bbox_projection")
 
         self.declare_parameter("depth_topic", "/camera/camera/aligned_depth_to_color/image_raw")
         self.declare_parameter("camera_info_topic", "/camera/camera/color/camera_info")
@@ -42,16 +41,11 @@ class PixelProjectionNode(Node):
         )
 
         self.create_service(
-            ProjectPixelTo3D,
-            "/drone_perception/project_pixel_to_3d",
-            self._handle_project_pixel,
-        )
-        self.create_service(
             ProjectBBoxTo3D,
             "/drone_perception/project_bbox_to_3d",
             self._handle_project_bbox,
         )
-        self.get_logger().info("Pixel projection service ready: /drone_perception/project_pixel_to_3d")
+        self.get_logger().info("BBox projection service ready: /drone_perception/project_bbox_to_3d")
 
     def _depth_cb(self, msg: Image) -> None:
         try:
@@ -140,82 +134,9 @@ class PixelProjectionNode(Node):
         rx, ry, rz = self._rotate_vector_by_quat(x, y, z, q.x, q.y, q.z, q.w)
         return rx + t.x, ry + t.y, rz + t.z
 
-    def _handle_project_pixel(
-        self, request: ProjectPixelTo3D.Request, response: ProjectPixelTo3D.Response
+    def _handle_project_bbox(
+        self, request: ProjectBBoxTo3D.Request, response: ProjectBBoxTo3D.Response
     ):
-        with self._lock:
-            depth = None if self._latest_depth is None else self._latest_depth.copy()
-            depth_encoding = self._latest_depth_encoding
-            camera_info = self._latest_camera_info
-
-        map_frame = self.get_parameter("map_frame").get_parameter_value().string_value
-        response.frame_id = map_frame
-
-        if depth is None or camera_info is None:
-            response.success = False
-            response.message = "Depth/CameraInfo data is not ready yet"
-            return response
-
-        pixel_x = int(request.pixel_x)
-        pixel_y = int(request.pixel_y)
-        h, w = depth.shape[:2]
-        if pixel_x < 0 or pixel_x >= w or pixel_y < 0 or pixel_y >= h:
-            response.success = False
-            response.message = f"Pixel out of image bounds: ({pixel_x}, {pixel_y}) not in {w}x{h}"
-            return response
-
-        window_size = self._resolve_window_size(int(request.window_size))
-        depth_m, valid_ratio = self._extract_depth_m(
-            pixel_x, pixel_y, depth, depth_encoding, window_size
-        )
-        min_valid_ratio = float(self.get_parameter("min_valid_ratio").value)
-        if depth_m is None or valid_ratio < min_valid_ratio:
-            response.success = False
-            response.message = (
-                f"Insufficient valid depth near pixel (valid_ratio={valid_ratio:.2f}, "
-                f"required>={min_valid_ratio:.2f})"
-            )
-            response.confidence = float(valid_ratio)
-            return response
-
-        fx = float(camera_info.k[0])
-        fy = float(camera_info.k[4])
-        cx = float(camera_info.k[2])
-        cy = float(camera_info.k[5])
-        if fx == 0.0 or fy == 0.0:
-            response.success = False
-            response.message = "Camera intrinsics are invalid"
-            return response
-
-        x_cam = (pixel_x - cx) * depth_m / fx
-        y_cam = (pixel_y - cy) * depth_m / fy
-        z_cam = depth_m
-
-        source_frame = camera_info.header.frame_id
-        if not source_frame:
-            source_frame = self.get_parameter("camera_frame").get_parameter_value().string_value
-        if not source_frame:
-            response.success = False
-            response.message = "Camera frame is empty in CameraInfo and camera_frame parameter"
-            return response
-
-        try:
-            x_map, y_map, z_map = self._transform_to_map(x_cam, y_cam, z_cam, source_frame)
-        except TransformException as exc:
-            response.success = False
-            response.message = f"TF lookup failed ({source_frame} -> {map_frame}): {exc}"
-            return response
-
-        response.success = True
-        response.message = "Pixel projected to map frame"
-        response.position.x = float(x_map)
-        response.position.y = float(y_map)
-        response.position.z = float(z_map)
-        response.depth_m = float(depth_m)
-        response.confidence = float(valid_ratio)
-        return response
-
-    def _handle_project_bbox(self, request: ProjectBBoxTo3D.Request, response: ProjectBBoxTo3D.Response):
         with self._lock:
             depth = None if self._latest_depth is None else self._latest_depth.copy()
             depth_encoding = self._latest_depth_encoding
@@ -325,7 +246,7 @@ class PixelProjectionNode(Node):
 
 def main():
     rclpy.init()
-    node = PixelProjectionNode()
+    node = BBoxProjectionNode()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

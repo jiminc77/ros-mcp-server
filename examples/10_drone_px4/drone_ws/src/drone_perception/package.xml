@@ -3,13 +3,12 @@
 <package format="3">
   <name>drone_perception</name>
   <version>0.0.0</version>
-  <description>Pixel-to-3D projection node for D455 based drone workflows</description>
+  <description>BBox-to-3D projection node for D455 based drone workflows</description>
   <maintainer email="husl-ai@todo.todo">husl-ai</maintainer>
   <license>TODO: License declaration</license>
 
   <depend>rclpy</depend>
   <depend>sensor_msgs</depend>
-  <depend>std_msgs</depend>
   <depend>geometry_msgs</depend>
   <depend>cv_bridge</depend>
   <depend>tf2_ros</depend>

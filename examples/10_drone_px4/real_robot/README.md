@@ -57,12 +57,8 @@ source install/setup.bash
 ros2 run drone_controller bridge
 ```
 
-### 5. (Optional) Launch Perception Node for D455 Pixel/BBox Projection
-This starts:
-- `/drone_perception/project_bbox_to_3d` (preferred)
-- `/drone_perception/project_pixel_to_3d` (fallback)
-
-Both services use RealSense depth + camera calibration streams.
+### 5. (Optional) Launch Perception Node for D455 BBox Projection
+This starts `/drone_perception/project_bbox_to_3d`.
 
 ```bash
 source /opt/ros/jazzy/setup.bash
@@ -70,7 +66,7 @@ source install/setup.bash
 ros2 launch drone_perception realsense_grounding.launch.py
 ```
 
-Vision detection itself is handled by Gemini multimodal (via image tools), then the detected bbox/pixel is projected to 3D map coordinates through ROS services.
+Vision detection itself is handled by Gemini multimodal (via image tools), then the detected bbox is projected to 3D map coordinates through the ROS service.
 Recommended structured output from Gemini detection step:
 
 ```json
@@ -84,20 +80,7 @@ Recommended structured output from Gemini detection step:
 }
 ```
 
-### 6. (Optional) Open Debug Visualization Window
-```bash
-source /opt/ros/jazzy/setup.bash
-source install/setup.bash
-ros2 launch drone_perception realsense_grounding.launch.py start_debug_view:=true
-```
-
-To draw Gemini results on this window, publish JSON overlay:
-```bash
-ros2 topic pub --once /drone_perception/debug_overlay std_msgs/msg/String \
-  "{data: '{\"label\":\"red box\",\"bbox\":{\"x_min\":510,\"y_min\":260,\"x_max\":760,\"y_max\":520},\"representative_pixel\":{\"x\":640,\"y\":380},\"depth_m\":2.3,\"object_map\":[3.1,1.4,2.3],\"waypoint\":[2.3,1.2,2.3]}'}"
-```
-
-### 7. (Optional) Launch Motion Capture Node
+### 6. (Optional) Launch Motion Capture Node
 Reference
 - Computer Vision (Optical Flow, MoCap, VIO, Avoidance) https://docs.px4.io/main/en/advanced/computer_vision
 - Using Vision or Motion Capture Systems for Position Estimation https://docs.px4.io/main/en/ros/external_position_estimation

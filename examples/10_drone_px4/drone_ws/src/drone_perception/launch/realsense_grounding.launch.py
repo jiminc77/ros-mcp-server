@@ -11,17 +11,11 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     start_realsense = LaunchConfiguration("start_realsense")
-    start_debug_view = LaunchConfiguration("start_debug_view")
 
     start_realsense_arg = DeclareLaunchArgument(
         "start_realsense",
         default_value="true",
         description="Start realsense2_camera with depth-color alignment",
-    )
-    start_debug_view_arg = DeclareLaunchArgument(
-        "start_debug_view",
-        default_value="false",
-        description="Open debug visualization window",
     )
 
     realsense_launch = IncludeLaunchDescription(
@@ -38,8 +32,8 @@ def generate_launch_description():
 
     grounding_node = Node(
         package="drone_perception",
-        executable="pixel_projection",
-        name="pixel_projection",
+        executable="bbox_projection",
+        name="bbox_projection",
         output="screen",
         parameters=[
             {"depth_topic": "/camera/camera/aligned_depth_to_color/image_raw"},
@@ -48,15 +42,4 @@ def generate_launch_description():
         ],
     )
 
-    debug_view_node = Node(
-        package="drone_perception",
-        executable="debug_view",
-        name="debug_view",
-        output="screen",
-        condition=IfCondition(start_debug_view),
-        parameters=[{"color_topic": "/camera/camera/color/image_raw"}],
-    )
-
-    return LaunchDescription(
-        [start_realsense_arg, start_debug_view_arg, realsense_launch, grounding_node, debug_view_node]
-    )
+    return LaunchDescription([start_realsense_arg, realsense_launch, grounding_node])

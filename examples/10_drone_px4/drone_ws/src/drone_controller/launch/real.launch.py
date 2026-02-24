@@ -13,7 +13,7 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "use_perception",
                 default_value="false",
-                description="Launch static pixel projection service node",
+                description="Launch static bbox projection service node",
             ),
             # MAVROS for Real Hardware (Serial / UART)
             Node(
@@ -36,7 +36,7 @@ def generate_launch_description():
             ),
             Node(
                 package="drone_perception",
-                executable="pixel_projection",
+                executable="bbox_projection",
                 output="screen",
                 condition=IfCondition(use_perception),
                 parameters=[

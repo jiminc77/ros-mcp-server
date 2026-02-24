@@ -13,7 +13,7 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "use_perception",
                 default_value="false",
-                description="Launch static pixel projection service node",
+                description="Launch static bbox projection service node",
             ),
             # 1. Start Simulated Drone (PX4 SITL) - User usually runs this manually, but we can try?
             # Actually standard practice is user runs 'make px4_sitl' in another term.
@@ -40,7 +40,7 @@ def generate_launch_description():
             ),
             Node(
                 package="drone_perception",
-                executable="pixel_projection",
+                executable="bbox_projection",
                 output="screen",
                 condition=IfCondition(use_perception),
                 parameters=[
