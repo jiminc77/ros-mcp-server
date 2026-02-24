@@ -32,18 +32,30 @@ prompts: |
   - For vision tasks:
     1) Read RGB image from topic (e.g. `/camera/camera/color/image_raw`) with `subscribe_once(..., expects_image='true')`
     2) Run `analyze_previously_received_image` and detect the target in the image
-    3) Output detection in structured JSON with at least:
-       - `pixel_x` (int)
-       - `pixel_y` (int)
+    3) Output detection in structured JSON with:
+       - `x_min`, `y_min`, `x_max`, `y_max` (bbox pixel coordinates)
        - `confidence` (float 0~1)
-    4) Call pixel projection service to convert the detected pixel into 3D map coordinates:
+       - `label` (string)
+    4) Prefer bbox projection service:
+       - Service: `/drone_perception/project_bbox_to_3d`
+       - Type: `drone_interfaces/srv/ProjectBBoxTo3D`
+       - Request fields: `x_min`, `y_min`, `x_max`, `y_max`, `sample_step`
+    5) If bbox is unavailable, fallback to pixel projection:
        - Service: `/drone_perception/project_pixel_to_3d`
        - Type: `drone_interfaces/srv/ProjectPixelTo3D`
        - Request fields: `pixel_x`, `pixel_y`, `window_size`
-    5) Use projected map coordinates to build trajectory waypoints
+    6) Use projected map coordinates to build trajectory waypoints
+  - When sending long-running action goals, set an explicit action timeout (for example 120s or more).
 
   Relative language handling:
   - If the user command is relative (e.g. behind/left/right/in front of), first ground the target into map coordinates, then compute a final absolute waypoint and execute trajectory.
+
+  Optional Debug Visualization:
+  - Publish overlay JSON to topic `/drone_perception/debug_overlay` (`std_msgs/msg/String`) to visualize:
+    - detected bbox
+    - representative pixel
+    - projected depth/map position
+    - generated waypoint
 
   Landing and RTL:
   - Land: call `/mavros/cmd/land`

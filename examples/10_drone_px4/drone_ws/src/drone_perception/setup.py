@@ -24,6 +24,7 @@ setup(
     entry_points={
         "console_scripts": [
             "pixel_projection = drone_perception.object_grounding_node:main",
+            "debug_view = drone_perception.debug_view_node:main",
         ],
     },
 )

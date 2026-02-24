@@ -1,0 +1,16 @@
+# Request
+int32 x_min
+int32 y_min
+int32 x_max
+int32 y_max
+int32 sample_step
+---
+# Response
+bool success
+string message
+geometry_msgs/Point position
+int32 representative_pixel_x
+int32 representative_pixel_y
+float32 depth_m
+float32 confidence
+string frame_id

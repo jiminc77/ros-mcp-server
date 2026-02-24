@@ -3,6 +3,7 @@ import threading
 import numpy as np
 import rclpy
 from cv_bridge import CvBridge
+from drone_interfaces.srv import ProjectBBoxTo3D
 from drone_interfaces.srv import ProjectPixelTo3D
 from rclpy.duration import Duration
 from rclpy.node import Node
@@ -44,6 +45,11 @@ class PixelProjectionNode(Node):
             ProjectPixelTo3D,
             "/drone_perception/project_pixel_to_3d",
             self._handle_project_pixel,
+        )
+        self.create_service(
+            ProjectBBoxTo3D,
+            "/drone_perception/project_bbox_to_3d",
+            self._handle_project_bbox,
         )
         self.get_logger().info("Pixel projection service ready: /drone_perception/project_pixel_to_3d")
 
@@ -97,6 +103,12 @@ class PixelProjectionNode(Node):
         if depth <= 0.0:
             return None, valid_ratio
         return depth, valid_ratio
+
+    def _to_meters(self, raw_depth: np.ndarray, encoding: str) -> np.ndarray:
+        depth = raw_depth.astype(np.float32)
+        if encoding.upper() in {"16UC1", "MONO16"}:
+            depth *= 0.001
+        return depth
 
     @staticmethod
     def _rotate_vector_by_quat(
@@ -201,6 +213,113 @@ class PixelProjectionNode(Node):
         response.position.z = float(z_map)
         response.depth_m = float(depth_m)
         response.confidence = float(valid_ratio)
+        return response
+
+    def _handle_project_bbox(self, request: ProjectBBoxTo3D.Request, response: ProjectBBoxTo3D.Response):
+        with self._lock:
+            depth = None if self._latest_depth is None else self._latest_depth.copy()
+            depth_encoding = self._latest_depth_encoding
+            camera_info = self._latest_camera_info
+
+        map_frame = self.get_parameter("map_frame").get_parameter_value().string_value
+        response.frame_id = map_frame
+
+        if depth is None or camera_info is None:
+            response.success = False
+            response.message = "Depth/CameraInfo data is not ready yet"
+            return response
+
+        h, w = depth.shape[:2]
+        x0 = max(0, min(int(request.x_min), int(request.x_max)))
+        y0 = max(0, min(int(request.y_min), int(request.y_max)))
+        x1 = min(w - 1, max(int(request.x_min), int(request.x_max)))
+        y1 = min(h - 1, max(int(request.y_min), int(request.y_max)))
+
+        if x0 > x1 or y0 > y1:
+            response.success = False
+            response.message = "Invalid bbox range"
+            return response
+
+        requested_step = int(request.sample_step)
+        sample_step = max(1, min(16, requested_step if requested_step > 0 else 1))
+        ys = np.arange(y0, y1 + 1, sample_step, dtype=np.int32)
+        xs = np.arange(x0, x1 + 1, sample_step, dtype=np.int32)
+        if ys.size == 0 or xs.size == 0:
+            response.success = False
+            response.message = "Empty bbox after sampling"
+            return response
+
+        patch_raw = depth[np.ix_(ys, xs)]
+        patch_m = self._to_meters(patch_raw, depth_encoding)
+
+        valid_mask = np.isfinite(patch_m) & (patch_m > 0.0)
+        total = patch_m.size
+        valid_count = int(np.count_nonzero(valid_mask))
+        valid_ratio = float(valid_count) / float(total) if total > 0 else 0.0
+        min_valid_ratio = float(self.get_parameter("min_valid_ratio").value)
+
+        if valid_count == 0 or valid_ratio < min_valid_ratio:
+            response.success = False
+            response.message = (
+                f"Insufficient valid depth in bbox (valid_ratio={valid_ratio:.2f}, "
+                f"required>={min_valid_ratio:.2f})"
+            )
+            response.confidence = float(valid_ratio)
+            return response
+
+        grid_y, grid_x = np.meshgrid(ys, xs, indexing="ij")
+        valid_depths = patch_m[valid_mask]
+        valid_x = grid_x[valid_mask]
+        valid_y = grid_y[valid_mask]
+
+        median_depth = float(np.median(valid_depths))
+        rep_index = int(np.argmin(np.abs(valid_depths - median_depth)))
+        rep_x = int(valid_x[rep_index])
+        rep_y = int(valid_y[rep_index])
+
+        window_size = self._resolve_window_size(0)
+        depth_m, local_ratio = self._extract_depth_m(rep_x, rep_y, depth, depth_encoding, window_size)
+        if depth_m is None:
+            depth_m = median_depth
+        confidence = min(valid_ratio, local_ratio if local_ratio > 0 else valid_ratio)
+
+        fx = float(camera_info.k[0])
+        fy = float(camera_info.k[4])
+        cx = float(camera_info.k[2])
+        cy = float(camera_info.k[5])
+        if fx == 0.0 or fy == 0.0:
+            response.success = False
+            response.message = "Camera intrinsics are invalid"
+            return response
+
+        x_cam = (rep_x - cx) * depth_m / fx
+        y_cam = (rep_y - cy) * depth_m / fy
+        z_cam = depth_m
+
+        source_frame = camera_info.header.frame_id
+        if not source_frame:
+            source_frame = self.get_parameter("camera_frame").get_parameter_value().string_value
+        if not source_frame:
+            response.success = False
+            response.message = "Camera frame is empty in CameraInfo and camera_frame parameter"
+            return response
+
+        try:
+            x_map, y_map, z_map = self._transform_to_map(x_cam, y_cam, z_cam, source_frame)
+        except TransformException as exc:
+            response.success = False
+            response.message = f"TF lookup failed ({source_frame} -> {map_frame}): {exc}"
+            return response
+
+        response.success = True
+        response.message = "BBox projected to map frame"
+        response.position.x = float(x_map)
+        response.position.y = float(y_map)
+        response.position.z = float(z_map)
+        response.representative_pixel_x = rep_x
+        response.representative_pixel_y = rep_y
+        response.depth_m = float(depth_m)
+        response.confidence = float(confidence)
         return response
 
 
