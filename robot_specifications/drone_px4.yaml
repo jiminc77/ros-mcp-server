@@ -29,7 +29,6 @@ prompts: |
 
   Vision Workflow (Gemini Multimodal):
   - Object detection is done by Gemini from camera images.
-  - Do not use color/shape rule-based detection services.
   - For vision tasks:
     1) Read RGB image from topic (e.g. `/camera/camera/color/image_raw`) with `subscribe_once(..., expects_image='true')`
     2) Run `analyze_previously_received_image` and detect the target in the image
