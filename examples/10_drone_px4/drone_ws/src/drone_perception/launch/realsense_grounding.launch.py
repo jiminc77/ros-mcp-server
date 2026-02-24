@@ -32,11 +32,10 @@ def generate_launch_description():
 
     grounding_node = Node(
         package="drone_perception",
-        executable="object_grounding",
-        name="object_grounding",
+        executable="pixel_projection",
+        name="pixel_projection",
         output="screen",
         parameters=[
-            {"color_topic": "/camera/camera/color/image_raw"},
             {"depth_topic": "/camera/camera/aligned_depth_to_color/image_raw"},
             {"camera_info_topic": "/camera/camera/color/camera_info"},
             {"map_frame": "map"},

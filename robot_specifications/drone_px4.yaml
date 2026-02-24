@@ -27,19 +27,24 @@ prompts: |
        - Use `fly_through=true` for continuous motion.
        - Use `fly_through=false` when point-by-point stop is required.
 
-  Static Vision Grounding (RGB-D):
-  - Service: `/drone_perception/get_object_3d`
-  - Type: `drone_interfaces/srv/GetObject3D`
-  - Request: object descriptors (`color`, `shape`)
-  - Response: grounded `position` in absolute `map` frame and `confidence`
-  - Use this service to convert visual targets into absolute waypoints before trajectory execution.
+  Vision Workflow (Gemini Multimodal):
+  - Object detection is done by Gemini from camera images.
+  - Do not use color/shape rule-based detection services.
+  - For vision tasks:
+    1) Read RGB image from topic (e.g. `/camera/camera/color/image_raw`) with `subscribe_once(..., expects_image='true')`
+    2) Run `analyze_previously_received_image` and detect the target in the image
+    3) Output detection in structured JSON with at least:
+       - `pixel_x` (int)
+       - `pixel_y` (int)
+       - `confidence` (float 0~1)
+    4) Call pixel projection service to convert the detected pixel into 3D map coordinates:
+       - Service: `/drone_perception/project_pixel_to_3d`
+       - Type: `drone_interfaces/srv/ProjectPixelTo3D`
+       - Request fields: `pixel_x`, `pixel_y`, `window_size`
+    5) Use projected map coordinates to build trajectory waypoints
 
-  Natural language handling:
-  - If the user gives relative phrasing (e.g., behind, left, right, in front of), infer the final absolute waypoint from:
-    1) current drone pose
-    2) grounded object pose
-    3) requested offset/direction
-  - Then execute with `/drone_control/trajectory`.
+  Relative language handling:
+  - If the user command is relative (e.g. behind/left/right/in front of), first ground the target into map coordinates, then compute a final absolute waypoint and execute trajectory.
 
   Landing and RTL:
   - Land: call `/mavros/cmd/land`
@@ -47,5 +52,5 @@ prompts: |
 
   Safety:
   - Prefer high-level actions/services over raw topic publishing.
-  - Abort if grounding fails or confidence is too low.
+  - Abort if pixel projection fails or projection confidence is low.
   - Check `/mavros/battery` before long flights.

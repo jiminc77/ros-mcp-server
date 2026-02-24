@@ -13,7 +13,7 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "use_perception",
                 default_value="false",
-                description="Launch static object grounding service node",
+                description="Launch static pixel projection service node",
             ),
             # 1. Start Simulated Drone (PX4 SITL) - User usually runs this manually, but we can try?
             # Actually standard practice is user runs 'make px4_sitl' in another term.
@@ -40,11 +40,10 @@ def generate_launch_description():
             ),
             Node(
                 package="drone_perception",
-                executable="object_grounding",
+                executable="pixel_projection",
                 output="screen",
                 condition=IfCondition(use_perception),
                 parameters=[
-                    {"color_topic": "/camera/camera/color/image_raw"},
                     {"depth_topic": "/camera/camera/aligned_depth_to_color/image_raw"},
                     {"camera_info_topic": "/camera/camera/color/camera_info"},
                     {"map_frame": "map"},

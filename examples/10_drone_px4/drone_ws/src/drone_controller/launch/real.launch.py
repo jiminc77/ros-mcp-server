@@ -13,7 +13,7 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "use_perception",
                 default_value="false",
-                description="Launch static object grounding service node",
+                description="Launch static pixel projection service node",
             ),
             # MAVROS for Real Hardware (Serial / UART)
             Node(
@@ -36,11 +36,10 @@ def generate_launch_description():
             ),
             Node(
                 package="drone_perception",
-                executable="object_grounding",
+                executable="pixel_projection",
                 output="screen",
                 condition=IfCondition(use_perception),
                 parameters=[
-                    {"color_topic": "/camera/camera/color/image_raw"},
                     {"depth_topic": "/camera/camera/aligned_depth_to_color/image_raw"},
                     {"camera_info_topic": "/camera/camera/color/camera_info"},
                     {"map_frame": "map"},

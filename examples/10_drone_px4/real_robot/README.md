@@ -57,13 +57,24 @@ source install/setup.bash
 ros2 run drone_controller bridge
 ```
 
-### 5. (Optional) Launch Perception Node for D455 Grounding
-This starts static object grounding service (`/drone_perception/get_object_3d`) using RealSense color+depth streams.
+### 5. (Optional) Launch Perception Node for D455 Pixel Projection
+This starts pixel projection service (`/drone_perception/project_pixel_to_3d`) using RealSense depth + camera calibration streams.
 
 ```bash
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
 ros2 launch drone_perception realsense_grounding.launch.py
+```
+
+Vision detection itself is handled by Gemini multimodal (via image tools), then the detected pixel is projected to 3D map coordinates through this ROS service.
+Recommended structured output from Gemini detection step:
+
+```json
+{
+  "pixel_x": 640,
+  "pixel_y": 360,
+  "confidence": 0.88
+}
 ```
 
 ### 6. (Optional) Launch Motion Capture Node
