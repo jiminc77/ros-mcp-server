@@ -1,3 +1,4 @@
+from collections import deque
 import threading
 
 import numpy as np
@@ -21,18 +22,19 @@ class BBoxProjectionNode(Node):
         self.declare_parameter("camera_frame", "")
         self.declare_parameter("map_frame", "map")
         self.declare_parameter("default_window_size", 5)
+        self.declare_parameter("depth_history_size", 5)
         self.declare_parameter("min_valid_ratio", 0.25)
 
         depth_topic = self.get_parameter("depth_topic").get_parameter_value().string_value
         camera_info_topic = self.get_parameter("camera_info_topic").get_parameter_value().string_value
+        depth_history_size = max(1, int(self.get_parameter("depth_history_size").value))
 
         self.bridge = CvBridge()
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
         self._lock = threading.Lock()
-        self._latest_depth: np.ndarray | None = None
-        self._latest_depth_encoding = ""
+        self._depth_history: deque[tuple[np.ndarray, str]] = deque(maxlen=depth_history_size)
         self._latest_camera_info: CameraInfo | None = None
 
         self.create_subscription(Image, depth_topic, self._depth_cb, qos_profile_sensor_data)
@@ -55,8 +57,7 @@ class BBoxProjectionNode(Node):
             return
 
         with self._lock:
-            self._latest_depth = depth
-            self._latest_depth_encoding = msg.encoding
+            self._depth_history.append((depth, msg.encoding))
 
     def _camera_info_cb(self, msg: CameraInfo) -> None:
         with self._lock:
@@ -98,11 +99,71 @@ class BBoxProjectionNode(Node):
             return None, valid_ratio
         return depth, valid_ratio
 
+    @staticmethod
+    def _status(code: str, detail: str) -> str:
+        return f"{code}: {detail}"
+
     def _to_meters(self, raw_depth: np.ndarray, encoding: str) -> np.ndarray:
         depth = raw_depth.astype(np.float32)
         if encoding.upper() in {"16UC1", "MONO16"}:
             depth *= 0.001
         return depth
+
+    def _average_patch_from_history(
+        self, depth_history: list[tuple[np.ndarray, str]], ys: np.ndarray, xs: np.ndarray
+    ) -> np.ndarray | None:
+        patches = []
+        y_max = int(ys[-1])
+        x_max = int(xs[-1])
+
+        for depth_img, encoding in depth_history:
+            h, w = depth_img.shape[:2]
+            if y_max >= h or x_max >= w:
+                continue
+            patch = self._to_meters(depth_img[np.ix_(ys, xs)], encoding)
+            patch[~np.isfinite(patch) | (patch <= 0.0)] = np.nan
+            patches.append(patch)
+
+        if not patches:
+            return None
+
+        stack = np.stack(patches, axis=0)
+        valid = np.isfinite(stack) & (stack > 0.0)
+        counts = valid.sum(axis=0)
+        sums = np.where(valid, stack, 0.0).sum(axis=0)
+        return np.divide(
+            sums,
+            counts,
+            out=np.full(sums.shape, np.nan, dtype=np.float32),
+            where=counts > 0,
+        )
+
+    def _extract_depth_from_history(
+        self,
+        pixel_x: int,
+        pixel_y: int,
+        depth_history: list[tuple[np.ndarray, str]],
+        window_size: int,
+    ) -> tuple[float | None, float]:
+        depths = []
+        valid_ratios = []
+
+        for depth_img, encoding in depth_history:
+            depth_m, valid_ratio = self._extract_depth_m(
+                pixel_x, pixel_y, depth_img, encoding, window_size
+            )
+            valid_ratios.append(valid_ratio)
+            if depth_m is not None:
+                depths.append(depth_m)
+
+        if not valid_ratios:
+            return None, 0.0
+
+        avg_valid_ratio = float(sum(valid_ratios) / len(valid_ratios))
+        if not depths:
+            return None, avg_valid_ratio
+
+        return float(sum(depths) / len(depths)), avg_valid_ratio
 
     @staticmethod
     def _rotate_vector_by_quat(
@@ -138,19 +199,21 @@ class BBoxProjectionNode(Node):
         self, request: ProjectBBoxTo3D.Request, response: ProjectBBoxTo3D.Response
     ):
         with self._lock:
-            depth = None if self._latest_depth is None else self._latest_depth.copy()
-            depth_encoding = self._latest_depth_encoding
+            depth_history = [(d.copy(), enc) for d, enc in self._depth_history]
             camera_info = self._latest_camera_info
 
         map_frame = self.get_parameter("map_frame").get_parameter_value().string_value
         response.frame_id = map_frame
 
-        if depth is None or camera_info is None:
+        if not depth_history or camera_info is None:
             response.success = False
-            response.message = "Depth/CameraInfo data is not ready yet"
+            response.message = self._status(
+                "E_DATA_NOT_READY", "Depth/CameraInfo data is not ready yet"
+            )
             return response
 
-        h, w = depth.shape[:2]
+        latest_depth = depth_history[-1][0]
+        h, w = latest_depth.shape[:2]
         x0 = max(0, min(int(request.x_min), int(request.x_max)))
         y0 = max(0, min(int(request.y_min), int(request.y_max)))
         x1 = min(w - 1, max(int(request.x_min), int(request.x_max)))
@@ -158,7 +221,7 @@ class BBoxProjectionNode(Node):
 
         if x0 > x1 or y0 > y1:
             response.success = False
-            response.message = "Invalid bbox range"
+            response.message = self._status("E_INVALID_BBOX", "Invalid bbox range")
             return response
 
         requested_step = int(request.sample_step)
@@ -167,11 +230,14 @@ class BBoxProjectionNode(Node):
         xs = np.arange(x0, x1 + 1, sample_step, dtype=np.int32)
         if ys.size == 0 or xs.size == 0:
             response.success = False
-            response.message = "Empty bbox after sampling"
+            response.message = self._status("E_INVALID_BBOX", "Empty bbox after sampling")
             return response
 
-        patch_raw = depth[np.ix_(ys, xs)]
-        patch_m = self._to_meters(patch_raw, depth_encoding)
+        patch_m = self._average_patch_from_history(depth_history, ys, xs)
+        if patch_m is None:
+            response.success = False
+            response.message = self._status("E_DATA_NOT_READY", "No usable depth frames in buffer")
+            return response
 
         valid_mask = np.isfinite(patch_m) & (patch_m > 0.0)
         total = patch_m.size
@@ -181,9 +247,12 @@ class BBoxProjectionNode(Node):
 
         if valid_count == 0 or valid_ratio < min_valid_ratio:
             response.success = False
-            response.message = (
-                f"Insufficient valid depth in bbox (valid_ratio={valid_ratio:.2f}, "
-                f"required>={min_valid_ratio:.2f})"
+            response.message = self._status(
+                "E_DEPTH_INVALID",
+                (
+                    f"Insufficient valid depth in bbox (valid_ratio={valid_ratio:.2f}, "
+                    f"required>={min_valid_ratio:.2f})"
+                ),
             )
             response.confidence = float(valid_ratio)
             return response
@@ -199,7 +268,9 @@ class BBoxProjectionNode(Node):
         rep_y = int(valid_y[rep_index])
 
         window_size = self._resolve_window_size(0)
-        depth_m, local_ratio = self._extract_depth_m(rep_x, rep_y, depth, depth_encoding, window_size)
+        depth_m, local_ratio = self._extract_depth_from_history(
+            rep_x, rep_y, depth_history, window_size
+        )
         if depth_m is None:
             depth_m = median_depth
         confidence = min(valid_ratio, local_ratio if local_ratio > 0 else valid_ratio)
@@ -210,7 +281,7 @@ class BBoxProjectionNode(Node):
         cy = float(camera_info.k[5])
         if fx == 0.0 or fy == 0.0:
             response.success = False
-            response.message = "Camera intrinsics are invalid"
+            response.message = self._status("E_CAMERA_INTRINSICS", "Camera intrinsics are invalid")
             return response
 
         x_cam = (rep_x - cx) * depth_m / fx
@@ -222,18 +293,22 @@ class BBoxProjectionNode(Node):
             source_frame = self.get_parameter("camera_frame").get_parameter_value().string_value
         if not source_frame:
             response.success = False
-            response.message = "Camera frame is empty in CameraInfo and camera_frame parameter"
+            response.message = self._status(
+                "E_CAMERA_FRAME", "Camera frame is empty in CameraInfo and camera_frame parameter"
+            )
             return response
 
         try:
             x_map, y_map, z_map = self._transform_to_map(x_cam, y_cam, z_cam, source_frame)
         except TransformException as exc:
             response.success = False
-            response.message = f"TF lookup failed ({source_frame} -> {map_frame}): {exc}"
+            response.message = self._status(
+                "E_TF_LOOKUP", f"TF lookup failed ({source_frame} -> {map_frame}): {exc}"
+            )
             return response
 
         response.success = True
-        response.message = "BBox projected to map frame"
+        response.message = self._status("OK_BBOX_PROJECTED", "BBox projected to map frame")
         response.position.x = float(x_map)
         response.position.y = float(y_map)
         response.position.z = float(z_map)

@@ -27,13 +27,14 @@ prompts: |
        - Use `fly_through=true` for continuous motion.
        - Use `fly_through=false` when point-by-point stop is required.
 
-  Vision Workflow (Gemini Multimodal + Structured Output):
-  1) Read RGB image (for example `/camera/camera/color/image_raw`) using `subscribe_once(..., expects_image='true')`.
-  2) Run `analyze_previously_received_image` and return structured JSON containing `label`, `confidence`, `x_min`, `y_min`, `x_max`, `y_max`.
-  3) If a valid bbox cannot be produced, treat it as object-detection failure and report that failure to the user.
-  4) Call `/drone_perception/project_bbox_to_3d` (`drone_interfaces/srv/ProjectBBoxTo3D`) with `x_min`, `y_min`, `x_max`, `y_max`, `sample_step`.
-  5) If bbox projection fails, report the failure to the user.
-  6) Use projected map coordinates to generate final waypoints and execute `/drone_control/trajectory`.
+  Vision Workflow:
+  - Read RGB image (for example /camera/camera/color/image_raw) using subscribe_once(..., expects_image='true').
+  - Run analyze_previously_received_image and return structured JSON containing label, confidence, x_min, y_min, x_max, y_max.
+  - Call /drone_perception/project_bbox_to_3d (drone_interfaces/srv/ProjectBBoxTo3D) with x_min, y_min, x_max, y_max, sample_step.
+  - The projection service uses averaged depth from recent frames (configured in the node) for robustness.
+  - Use projected map coordinates to generate final waypoints and execute /drone_control/trajectory.
+  - If a valid bbox cannot be produced, or if bbox projection to 3D fails, treat it as failure and report that failure to the user.
+  - Parse failures by message code prefix (E_*). Success messages use OK_*.
 
   Relative Language:
   - For commands like behind/left/right/front, convert the grounded object position into a final absolute `map` waypoint before sending trajectory.

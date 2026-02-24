@@ -106,7 +106,7 @@ class DroneMCPBridge(Node):
     def _claim_goal(self, name: str) -> tuple[bool, str]:
         if not self._goal_lock.acquire(blocking=False):
             active = self._active_goal_name or "another goal"
-            return False, f"Goal rejected: {active} is already running"
+            return False, self._status("E_GOAL_BUSY", f"{active} is already running")
         self._active_goal_name = name
         return True, ""
 
@@ -128,38 +128,48 @@ class DroneMCPBridge(Node):
         self.target_pose.pose.orientation.z = math.sin(yaw * 0.5)
         self.target_pose.pose.orientation.w = math.cos(yaw * 0.5)
 
-    async def prepare_for_flight(self) -> bool:
+    @staticmethod
+    def _status(code: str, detail: str) -> str:
+        return f"{code}: {detail}"
+
+    async def prepare_for_flight(self) -> tuple[bool, str]:
         if not self.current_state.connected:
-            self.get_logger().error("FCU not connected")
-            return False
+            message = self._status("E_FCU_NOT_CONNECTED", "FCU not connected")
+            self.get_logger().error(message)
+            return False, message
 
         if not self.is_primed:
-            self.get_logger().warn("Waiting for local position lock")
-            return False
+            message = self._status("E_LOCAL_POSE_NOT_READY", "Local position lock not ready")
+            self.get_logger().warn(message)
+            return False, message
 
         if not self.mode_cli.wait_for_service(timeout_sec=1.0):
-            self.get_logger().error("SetMode service unavailable")
-            return False
+            message = self._status("E_SET_MODE_SERVICE_UNAVAILABLE", "SetMode service unavailable")
+            self.get_logger().error(message)
+            return False, message
         if not self.arm_cli.wait_for_service(timeout_sec=1.0):
-            self.get_logger().error("Arming service unavailable")
-            return False
+            message = self._status("E_ARM_SERVICE_UNAVAILABLE", "Arming service unavailable")
+            self.get_logger().error(message)
+            return False, message
 
         if self.current_state.mode != "OFFBOARD":
             mode_req = SetMode.Request(custom_mode="OFFBOARD")
             mode_resp = await self.mode_cli.call_async(mode_req)
             if not mode_resp or not mode_resp.mode_sent:
-                self.get_logger().error("Failed to set OFFBOARD mode")
-                return False
+                message = self._status("E_OFFBOARD_SET_FAILED", "Failed to set OFFBOARD mode")
+                self.get_logger().error(message)
+                return False, message
             await asyncio.sleep(0.5)
 
         if not self.current_state.armed:
             arm_req = CommandBool.Request(value=True)
             arm_resp = await self.arm_cli.call_async(arm_req)
             if not arm_resp or not arm_resp.success:
-                self.get_logger().error("Failed to arm")
-                return False
+                message = self._status("E_ARM_FAILED", "Failed to arm")
+                self.get_logger().error(message)
+                return False, message
 
-        return True
+        return True, ""
 
     async def execute_takeoff(self, goal_handle):
         claimed, reason = self._claim_goal("takeoff")
@@ -172,13 +182,17 @@ class DroneMCPBridge(Node):
             if target_altitude <= 0.0:
                 goal_handle.abort()
                 return DroneTakeoff.Result(
-                    success=False, message="target_altitude must be greater than 0"
+                    success=False,
+                    message=self._status(
+                        "E_INVALID_REQUEST", "target_altitude must be greater than 0"
+                    ),
                 )
 
             self.get_logger().info(f"Takeoff goal received: {target_altitude:.2f}m")
-            if not await self.prepare_for_flight():
+            ready, reason = await self.prepare_for_flight()
+            if not ready:
                 goal_handle.abort()
-                return DroneTakeoff.Result(success=False, message="Failed to arm/offboard")
+                return DroneTakeoff.Result(success=False, message=reason)
 
             self._set_target_pose(
                 self.current_pose.pose.position.x,
@@ -191,7 +205,9 @@ class DroneMCPBridge(Node):
             while rclpy.ok():
                 if goal_handle.is_cancel_requested:
                     goal_handle.canceled()
-                    return DroneTakeoff.Result(success=False, message="Canceled")
+                    return DroneTakeoff.Result(
+                        success=False, message=self._status("E_CANCELED", "Takeoff canceled")
+                    )
 
                 current_z = float(self.current_pose.pose.position.z)
                 error = abs(target_altitude - current_z)
@@ -200,16 +216,24 @@ class DroneMCPBridge(Node):
 
                 if error <= self.TAKEOFF_TOLERANCE_M:
                     goal_handle.succeed()
-                    return DroneTakeoff.Result(success=True, message="Takeoff complete")
+                    return DroneTakeoff.Result(
+                        success=True,
+                        message=self._status("OK_TAKEOFF_COMPLETE", "Takeoff complete"),
+                    )
 
                 if time.monotonic() - start_time > self.TAKEOFF_TIMEOUT_SEC:
                     goal_handle.abort()
-                    return DroneTakeoff.Result(success=False, message="Takeoff timeout")
+                    return DroneTakeoff.Result(
+                        success=False,
+                        message=self._status("E_TAKEOFF_TIMEOUT", "Takeoff timeout"),
+                    )
 
                 await asyncio.sleep(0.1)
 
             goal_handle.abort()
-            return DroneTakeoff.Result(success=False, message="ROS shutdown")
+            return DroneTakeoff.Result(
+                success=False, message=self._status("E_ROS_SHUTDOWN", "ROS shutdown")
+            )
         finally:
             self._release_goal()
 
@@ -224,14 +248,18 @@ class DroneMCPBridge(Node):
             points = [(float(p.x), float(p.y), float(p.z)) for p in req.points]
             if not points:
                 goal_handle.abort()
-                return DroneTrajectory.Result(success=False, message="No trajectory points provided")
+                return DroneTrajectory.Result(
+                    success=False,
+                    message=self._status("E_INVALID_REQUEST", "No trajectory points provided"),
+                )
 
             self.get_logger().info(
                 f"Trajectory goal received: {len(points)} points, fly_through={req.fly_through}"
             )
-            if not await self.prepare_for_flight():
+            ready, reason = await self.prepare_for_flight()
+            if not ready:
                 goal_handle.abort()
-                return DroneTrajectory.Result(success=False, message="Failed to arm/offboard")
+                return DroneTrajectory.Result(success=False, message=reason)
 
             speed = float(req.speed) if req.speed > 0.0 else self.DEFAULT_SPEED_MPS
             tolerance = (
@@ -254,7 +282,10 @@ class DroneMCPBridge(Node):
                 while rclpy.ok():
                     if goal_handle.is_cancel_requested:
                         goal_handle.canceled()
-                        return DroneTrajectory.Result(success=False, message="Canceled")
+                        return DroneTrajectory.Result(
+                            success=False,
+                            message=self._status("E_CANCELED", "Trajectory canceled"),
+                        )
 
                     dx = target[0] - setpoint[0]
                     dy = target[1] - setpoint[1]
@@ -305,7 +336,9 @@ class DroneMCPBridge(Node):
                         goal_handle.abort()
                         return DroneTrajectory.Result(
                             success=False,
-                            message=f"Timeout while reaching waypoint {idx}",
+                            message=self._status(
+                                "E_WAYPOINT_TIMEOUT", f"Timeout while reaching waypoint {idx}"
+                            ),
                         )
 
                     await asyncio.sleep(self.CONTROL_DT)
@@ -314,7 +347,10 @@ class DroneMCPBridge(Node):
                     await asyncio.sleep(self.HOLD_TIME_SEC)
 
             goal_handle.succeed()
-            return DroneTrajectory.Result(success=True, message="Trajectory complete")
+            return DroneTrajectory.Result(
+                success=True,
+                message=self._status("OK_TRAJECTORY_COMPLETE", "Trajectory complete"),
+            )
         finally:
             self._release_goal()
 
