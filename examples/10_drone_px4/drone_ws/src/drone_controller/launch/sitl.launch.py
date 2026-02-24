@@ -15,10 +15,7 @@ def generate_launch_description():
                 default_value="false",
                 description="Launch static bbox projection service node",
             ),
-            # 1. Start Simulated Drone (PX4 SITL) - User usually runs this manually, but we can try?
-            # Actually standard practice is user runs 'make px4_sitl' in another term.
-            # But we can launch MAVROS.
-            # MAVROS
+            # MAVROS for PX4 SITL
             Node(
                 package="mavros",
                 executable="mavros_node",

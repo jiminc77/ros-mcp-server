@@ -58,7 +58,7 @@ wget https://d176tv9ibo4jno.cloudfront.net/latest/QGroundControl-x86_64.AppImage
 chmod +x ./QGroundControl-x86_64.AppImage
 ```
 
-### 4. Install This Package (rms-dronecmd)
+### 4. Install Drone Workspace
 ```bash
 # Navigate to the workspace within this example
 cd ../drone_ws

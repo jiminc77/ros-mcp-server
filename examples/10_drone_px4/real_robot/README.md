@@ -67,6 +67,11 @@ ros2 launch drone_perception realsense_grounding.launch.py
 ```
 
 Vision detection itself is handled by Gemini multimodal (via image tools), then the detected bbox is projected to 3D map coordinates through the ROS service.
+The projection node uses averaged depth from recent frames (default history size is 5) for more stable grounding.
+Service/action results use message prefixes for fast parsing:
+- failures: `E_*`
+- success: `OK_*`
+
 Recommended structured output from Gemini detection step:
 
 ```json
