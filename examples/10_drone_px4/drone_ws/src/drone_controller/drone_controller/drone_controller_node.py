@@ -68,6 +68,7 @@ class DroneMCPBridge(Node):
         self.current_state = State()
         self.current_pose = PoseStamped()
         self.target_pose = PoseStamped()
+        self.target_pose.header.frame_id = "map"
         self.target_pose.pose.orientation.w = 1.0
         self.is_primed = False
 
@@ -100,7 +101,6 @@ class DroneMCPBridge(Node):
             return
 
         self.target_pose.header.stamp = self.get_clock().now().to_msg()
-        self.target_pose.header.frame_id = "map"
         self.local_pos_pub.publish(self.target_pose)
 
     def _claim_goal(self, name: str) -> tuple[bool, str]:
@@ -113,10 +113,6 @@ class DroneMCPBridge(Node):
     def _release_goal(self) -> None:
         self._active_goal_name = ""
         self._goal_lock.release()
-
-    @staticmethod
-    def _distance(a: tuple[float, float, float], b: tuple[float, float, float]) -> float:
-        return math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2)
 
     def _set_target_pose(self, x: float, y: float, z: float) -> None:
         self.target_pose.pose.position.x = x
@@ -296,7 +292,7 @@ class DroneMCPBridge(Node):
                         float(self.current_pose.pose.position.y),
                         float(self.current_pose.pose.position.z),
                     )
-                    drone_dist_to_target = self._distance(current, target)
+                    drone_dist_to_target = math.dist(current, target)
 
                     feedback.current_point_index = idx
                     feedback.distance_remaining = float(drone_dist_to_target)
