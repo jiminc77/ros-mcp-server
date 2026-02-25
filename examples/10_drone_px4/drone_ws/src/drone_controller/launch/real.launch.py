@@ -1,12 +1,18 @@
+import os
+
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.conditions import IfCondition
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
 def generate_launch_description():
     use_perception = LaunchConfiguration("use_perception")
+    fcu_url = LaunchConfiguration("fcu_url")
+    mavros_px4_launch = os.path.join(get_package_share_directory("mavros"), "launch", "px4.launch")
 
     return LaunchDescription(
         [
@@ -15,19 +21,14 @@ def generate_launch_description():
                 default_value="false",
                 description="Launch static bbox projection service node",
             ),
-            # MAVROS for Real Hardware (Serial / UART)
-            Node(
-                package="mavros",
-                executable="mavros_node",
-                output="screen",
-                parameters=[
-                    # ADJUST THESE FOR REAL DRONE
-                    {"fcu_url": "serial:///dev/ttyUSB0:57600"},
-                    {"system_id": 255},
-                    {"component_id": 190},
-                    {"target_system_id": 1},
-                    {"target_component_id": 1},
-                ],
+            DeclareLaunchArgument(
+                "fcu_url",
+                default_value="serial:///dev/ttyUSB0:57600",
+                description="MAVROS FCU connection URL",
+            ),
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(mavros_px4_launch),
+                launch_arguments={"fcu_url": fcu_url}.items(),
             ),
             # Bridge Node
             Node(
