@@ -13,7 +13,7 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.parameter import Parameter
-from rclpy.parameter_client import AsyncParametersClient
+from rclpy.parameter_client import AsyncParameterClient
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 
 
@@ -51,7 +51,7 @@ class DroneMCPBridge(Node):
         self.mode_cli = self.create_client(
             SetMode, "/mavros/set_mode", callback_group=self.callback_group
         )
-        self.local_pos_param_cli = AsyncParametersClient(self, "/mavros/local_position")
+        self.local_pos_param_cli = AsyncParameterClient(self, "/mavros/local_position")
         self._local_pos_param_pending = False
         self._local_pos_param_ready = False
         self._local_pos_param_attempts = 0
