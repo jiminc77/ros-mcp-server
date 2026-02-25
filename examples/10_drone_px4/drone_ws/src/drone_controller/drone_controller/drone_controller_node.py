@@ -54,6 +54,7 @@ class DroneMCPBridge(Node):
         self.local_pos_param_cli = AsyncParametersClient(self, "/mavros/local_position")
         self._local_pos_param_pending = False
         self._local_pos_param_ready = False
+        self._local_pos_param_attempts = 0
 
         self._action_takeoff = ActionServer(
             self,
@@ -122,6 +123,7 @@ class DroneMCPBridge(Node):
             Parameter("tf.frame_id", Parameter.Type.STRING, "map"),
             Parameter("tf.child_frame_id", Parameter.Type.STRING, "base_link"),
         ]
+        self._local_pos_param_attempts += 1
         self._local_pos_param_pending = True
         future = self.local_pos_param_cli.set_parameters(params)
         future.add_done_callback(self._on_local_position_tf_params_set)
@@ -129,9 +131,22 @@ class DroneMCPBridge(Node):
     def _on_local_position_tf_params_set(self, future) -> None:
         self._local_pos_param_pending = False
         try:
-            results = future.result()
+            result_obj = future.result()
         except Exception as exc:
             self.get_logger().warn(f"Failed to set MAVROS local_position TF params: {exc}")
+            return
+
+        results = result_obj.results if hasattr(result_obj, "results") else result_obj
+        if not results:
+            self.get_logger().warn("MAVROS local_position TF param set returned empty response")
+            return
+
+        failed = [getattr(r, "reason", "") for r in results if not getattr(r, "successful", False)]
+        if failed:
+            self.get_logger().warn(
+                "MAVROS local_position TF param set rejected "
+                f"(attempt {self._local_pos_param_attempts}): {failed}"
+            )
             return
 
         if results and all(r.successful for r in results):
