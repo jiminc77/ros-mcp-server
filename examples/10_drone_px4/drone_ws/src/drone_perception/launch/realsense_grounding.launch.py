@@ -42,4 +42,28 @@ def generate_launch_description():
         ],
     )
 
-    return LaunchDescription([start_realsense_arg, realsense_launch, grounding_node])
+    mount_tf_node = Node(
+        package="tf2_ros",
+        executable="static_transform_publisher",
+        name="camera_mount_tf",
+        output="screen",
+        arguments=[
+            "0.0",
+            "0.0",
+            "-0.10",
+            "0.0",
+            "0.0",
+            "3.141592653589793",
+            "base_link",
+            "camera_link",
+        ],
+    )
+
+    return LaunchDescription(
+        [
+            start_realsense_arg,
+            realsense_launch,
+            mount_tf_node,
+            grounding_node,
+        ]
+    )
