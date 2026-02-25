@@ -39,6 +39,7 @@ prompts: |
   - If valid bbox JSON cannot be produced, treat as object-detection failure and report failure.
   - Call `/drone_perception/project_bbox_to_3d` (`drone_interfaces/srv/ProjectBBoxTo3D`) with:
     `x_min, y_min, x_max, y_max, sample_step, image_stamp_sec, image_stamp_nanosec`.
+  - Do not estimate depth from raw depth topic reads or ad-hoc scripts. Depth must come from `/drone_perception/project_bbox_to_3d`.
   - Use bbox coordinates exactly as detected on the rotated image. Do not manually convert bbox coordinates.
   - If projection returns `success=false`, report the failure message to the user.
   - For visualization, publish `/drone_perception/ui_overlay` as JSON String.data:

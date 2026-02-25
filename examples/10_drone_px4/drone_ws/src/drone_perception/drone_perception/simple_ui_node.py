@@ -109,15 +109,38 @@ class SimpleUiNode(Node):
         bbox = overlay.get("bbox", overlay)
         if not isinstance(bbox, dict):
             return None
-        keys = ("x_min", "y_min", "x_max", "y_max")
-        if not all(k in bbox for k in keys):
+
+        # Accept a few common key variants from LLM outputs.
+        key_candidates = [
+            ("x_min", "y_min", "x_max", "y_max"),
+            ("xmin", "ymin", "xmax", "ymax"),
+            ("left", "top", "right", "bottom"),
+            ("x1", "y1", "x2", "y2"),
+        ]
+        values = None
+        for keys in key_candidates:
+            if all(k in bbox for k in keys):
+                values = tuple(bbox[k] for k in keys)
+                break
+        if values is None:
             return None
-        values = (bbox["x_min"], bbox["y_min"], bbox["x_max"], bbox["y_max"])
 
         try:
-            x_min, y_min, x_max, y_max = [int(v) for v in values]
+            x_min, y_min, x_max, y_max = [float(v) for v in values]
         except Exception:
             return None
+
+        # Support normalized [0, 1] bbox values.
+        if 0.0 <= min(x_min, y_min, x_max, y_max) and max(x_min, y_min, x_max, y_max) <= 1.0:
+            x_min *= (w - 1)
+            x_max *= (w - 1)
+            y_min *= (h - 1)
+            y_max *= (h - 1)
+
+        x_min = int(round(x_min))
+        y_min = int(round(y_min))
+        x_max = int(round(x_max))
+        y_max = int(round(y_max))
 
         if x_min > x_max:
             x_min, x_max = x_max, x_min
