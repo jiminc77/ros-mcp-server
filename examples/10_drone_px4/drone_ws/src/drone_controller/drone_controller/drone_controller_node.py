@@ -115,8 +115,6 @@ class DroneMCPBridge(Node):
     def ensure_local_position_tf_params(self) -> None:
         if self._local_pos_param_ready or self._local_pos_param_pending:
             return
-        if not self.local_pos_param_cli.service_is_ready():
-            return
 
         params = [
             Parameter("tf.send", Parameter.Type.BOOL, True),
@@ -125,7 +123,16 @@ class DroneMCPBridge(Node):
         ]
         self._local_pos_param_attempts += 1
         self._local_pos_param_pending = True
-        future = self.local_pos_param_cli.set_parameters(params)
+        try:
+            future = self.local_pos_param_cli.set_parameters(params)
+        except Exception as exc:
+            self._local_pos_param_pending = False
+            if self._local_pos_param_attempts % 5 == 0:
+                self.get_logger().warn(
+                    "Waiting for MAVROS local_position parameter service "
+                    f"(attempt {self._local_pos_param_attempts}): {exc}"
+                )
+            return
         future.add_done_callback(self._on_local_position_tf_params_set)
 
     def _on_local_position_tf_params_set(self, future) -> None:
