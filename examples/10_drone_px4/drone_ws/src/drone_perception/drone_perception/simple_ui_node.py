@@ -60,15 +60,10 @@ class SimpleUiNode(Node):
 
     @staticmethod
     def _draw_overlay(image, overlay: dict) -> None:
-        bbox = overlay.get("bbox", overlay)
-        if isinstance(bbox, dict):
-            keys = ("x_min", "y_min", "x_max", "y_max")
-            if all(k in bbox for k in keys):
-                x_min = int(bbox["x_min"])
-                y_min = int(bbox["y_min"])
-                x_max = int(bbox["x_max"])
-                y_max = int(bbox["y_max"])
-                cv2.rectangle(image, (x_min, y_min), (x_max, y_max), (0, 255, 255), 2)
+        bbox = SimpleUiNode._parse_bbox(overlay, image.shape[:2])
+        if bbox is not None:
+            x_min, y_min, x_max, y_max = bbox
+            cv2.rectangle(image, (x_min, y_min), (x_max, y_max), (0, 255, 255), 2)
 
         rep = overlay.get("representative_pixel")
         if isinstance(rep, dict) and "x" in rep and "y" in rep:
@@ -107,6 +102,38 @@ class SimpleUiNode(Node):
                 2,
                 cv2.LINE_AA,
             )
+
+    @staticmethod
+    def _parse_bbox(overlay: dict, image_shape):
+        h, w = image_shape
+        bbox = overlay.get("bbox", overlay)
+        if not isinstance(bbox, dict):
+            return None
+        keys = ("x_min", "y_min", "x_max", "y_max")
+        if not all(k in bbox for k in keys):
+            return None
+        values = (bbox["x_min"], bbox["y_min"], bbox["x_max"], bbox["y_max"])
+
+        try:
+            x_min, y_min, x_max, y_max = [int(v) for v in values]
+        except Exception:
+            return None
+
+        if x_min > x_max:
+            x_min, x_max = x_max, x_min
+        if y_min > y_max:
+            y_min, y_max = y_max, y_min
+
+        # Clamp to image bounds when available.
+        if isinstance(w, int) and isinstance(h, int) and w > 0 and h > 0:
+            x_min = max(0, min(x_min, w - 1))
+            x_max = max(0, min(x_max, w - 1))
+            y_min = max(0, min(y_min, h - 1))
+            y_max = max(0, min(y_max, h - 1))
+
+        if x_min == x_max or y_min == y_max:
+            return None
+        return x_min, y_min, x_max, y_max
 
 
 def main():

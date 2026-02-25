@@ -33,7 +33,8 @@ prompts: |
   - Call /drone_perception/project_bbox_to_3d (drone_interfaces/srv/ProjectBBoxTo3D) with x_min, y_min, x_max, y_max, sample_step.
   - The projection service uses averaged depth from recent frames (configured in the node) for robustness.
   - Use projected map coordinates to generate final waypoints and execute /drone_control/trajectory.
-  - Publish visualization JSON to /drone_perception/ui_overlay (`std_msgs/msg/String`) including bbox, representative pixel, depth, object_map, and waypoint.
+  - Publish visualization JSON to /drone_perception/ui_overlay (`std_msgs/msg/String`) with strict schema:
+    `bbox: {x_min, y_min, x_max, y_max}` plus representative pixel, depth, object_map, and waypoint.
   - If a valid bbox cannot be produced, or if bbox projection to 3D fails, treat it as failure and report that failure to the user.
   - Parse failures by message code prefix (E_*). Success messages use OK_*.
 
