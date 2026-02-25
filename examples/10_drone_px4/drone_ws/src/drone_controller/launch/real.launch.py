@@ -25,9 +25,6 @@ def generate_launch_description():
                     {"fcu_url": "serial:///dev/ttyUSB0:57600"},
                     {"system_id": 1},
                     {"component_id": 1},
-                    {"local_position.tf.send": True},
-                    {"local_position.tf.frame_id": "map"},
-                    {"local_position.tf.child_frame_id": "base_link"},
                 ],
             ),
             # Bridge Node

@@ -36,6 +36,9 @@ prompts: |
   - Publish /drone_perception/ui_overlay (`std_msgs/msg/String`) with keys:
     `bbox{x_min,y_min,x_max,y_max}`, `representative_pixel{x,y}`, `depth_m`,
     `object_map{x,y,z,frame_id}`, `waypoint{x,y,z}`, `error_code`, `error_message`.
+  - `publish_once` must send JSON in String.data:
+    `msg={"data":"{\"bbox\":{...},\"representative_pixel\":{...},...}"}`.
+    Do not send shorthand text formats like `bbox{...}`.
   - Use `depth_m` key name only (do not use `depth`).
   - If a valid bbox cannot be produced, or if bbox projection to 3D fails, treat it as failure and report that failure to the user.
   - Parse failures by message code prefix (E_*). Success messages use OK_*.

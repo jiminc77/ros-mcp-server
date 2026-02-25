@@ -12,6 +12,8 @@ from rclpy.action import ActionServer
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from rclpy.parameter import Parameter
+from rclpy.parameter_client import AsyncParametersClient
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 
 
@@ -49,6 +51,9 @@ class DroneMCPBridge(Node):
         self.mode_cli = self.create_client(
             SetMode, "/mavros/set_mode", callback_group=self.callback_group
         )
+        self.local_pos_param_cli = AsyncParametersClient(self, "/mavros/local_position")
+        self._local_pos_param_pending = False
+        self._local_pos_param_ready = False
 
         self._action_takeoff = ActionServer(
             self,
@@ -78,6 +83,9 @@ class DroneMCPBridge(Node):
         self.timer = self.create_timer(
             self.CONTROL_DT, self.timer_callback, callback_group=self.callback_group
         )
+        self.local_pos_param_timer = self.create_timer(
+            2.0, self.ensure_local_position_tf_params, callback_group=self.callback_group
+        )
         self.get_logger().info("--- Drone Bridge Online (Fixed 50Hz + Smoothed Setpoint) ---")
 
     def state_cb(self, msg: State) -> None:
@@ -102,6 +110,34 @@ class DroneMCPBridge(Node):
 
         self.target_pose.header.stamp = self.get_clock().now().to_msg()
         self.local_pos_pub.publish(self.target_pose)
+
+    def ensure_local_position_tf_params(self) -> None:
+        if self._local_pos_param_ready or self._local_pos_param_pending:
+            return
+        if not self.local_pos_param_cli.service_is_ready():
+            return
+
+        params = [
+            Parameter("tf.send", Parameter.Type.BOOL, True),
+            Parameter("tf.frame_id", Parameter.Type.STRING, "map"),
+            Parameter("tf.child_frame_id", Parameter.Type.STRING, "base_link"),
+        ]
+        self._local_pos_param_pending = True
+        future = self.local_pos_param_cli.set_parameters(params)
+        future.add_done_callback(self._on_local_position_tf_params_set)
+
+    def _on_local_position_tf_params_set(self, future) -> None:
+        self._local_pos_param_pending = False
+        try:
+            results = future.result()
+        except Exception as exc:
+            self.get_logger().warn(f"Failed to set MAVROS local_position TF params: {exc}")
+            return
+
+        if results and all(r.successful for r in results):
+            self._local_pos_param_ready = True
+            self.local_pos_param_timer.cancel()
+            self.get_logger().info("MAVROS local_position TF params set (tf.send=true)")
 
     def _claim_goal(self, name: str) -> tuple[bool, str]:
         if not self._goal_lock.acquire(blocking=False):
