@@ -84,15 +84,17 @@ class DroneMCPBridge(Node):
         self.timer = self.create_timer(
             self.CONTROL_DT, self.timer_callback, callback_group=self.callback_group
         )
-        self.local_pos_param_timer = self.create_timer(
-            2.0, self.ensure_local_position_tf_params, callback_group=self.callback_group
-        )
         self.get_logger().info("--- Drone Bridge Online (Fixed 50Hz + Smoothed Setpoint) ---")
 
     def state_cb(self, msg: State) -> None:
         self.current_state = msg
+        if not self._local_pos_param_ready:
+            self.ensure_local_position_tf_params()
 
     def local_cb(self, msg: PoseStamped) -> None:
+        if not self._local_pos_param_ready:
+            self.ensure_local_position_tf_params()
+
         self.current_pose = msg
         if not self.is_primed:
             self.target_pose.pose.position.x = msg.pose.position.x
@@ -158,7 +160,6 @@ class DroneMCPBridge(Node):
 
         if results and all(r.successful for r in results):
             self._local_pos_param_ready = True
-            self.local_pos_param_timer.cancel()
             self.get_logger().info("MAVROS local_position TF params set (tf.send=true)")
 
     def _claim_goal(self, name: str) -> tuple[bool, str]:
