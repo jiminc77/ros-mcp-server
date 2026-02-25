@@ -26,6 +26,10 @@ class DroneMCPBridge(Node):
     TAKEOFF_TIMEOUT_SEC = 45.0
     WAYPOINT_TIMEOUT_SEC = 120.0
     HOLD_TIME_SEC = 0.5
+    OFFBOARD_PRIME_SEC = 1.0
+    COMMAND_RETRY_DELAY_SEC = 0.2
+    MODE_RETRY_COUNT = 5
+    ARM_RETRY_COUNT = 10
 
     def __init__(self):
         super().__init__("drone_mcp_bridge")
@@ -213,22 +217,50 @@ class DroneMCPBridge(Node):
             self.get_logger().error(message)
             return False, message
 
-        if self.current_state.mode != "OFFBOARD":
-            mode_req = SetMode.Request(custom_mode="OFFBOARD")
-            mode_resp = await self.mode_cli.call_async(mode_req)
-            if not mode_resp or not mode_resp.mode_sent:
-                message = self._status("E_OFFBOARD_SET_FAILED", "Failed to set OFFBOARD mode")
+        prime_until = time.monotonic() + self.OFFBOARD_PRIME_SEC
+        while time.monotonic() < prime_until:
+            if not self.current_state.connected:
+                message = self._status("E_FCU_NOT_CONNECTED", "FCU connection lost")
                 self.get_logger().error(message)
                 return False, message
-            time.sleep(0.5)
+            time.sleep(self.CONTROL_DT)
+
+        if self.current_state.mode != "OFFBOARD":
+            mode_set = False
+            for _ in range(self.MODE_RETRY_COUNT):
+                mode_req = SetMode.Request(custom_mode="OFFBOARD")
+                mode_resp = await self.mode_cli.call_async(mode_req)
+                if mode_resp and mode_resp.mode_sent:
+                    mode_set = True
+                if self.current_state.mode == "OFFBOARD":
+                    mode_set = True
+                    break
+                time.sleep(self.COMMAND_RETRY_DELAY_SEC)
+            if not mode_set:
+                message = self._status(
+                    "E_OFFBOARD_SET_FAILED", "Failed to set OFFBOARD mode after retries"
+                )
+                self.get_logger().error(message)
+                return False, message
 
         if not self.current_state.armed:
-            arm_req = CommandBool.Request(value=True)
-            arm_resp = await self.arm_cli.call_async(arm_req)
-            if not arm_resp or not arm_resp.success:
-                message = self._status("E_ARM_FAILED", "Failed to arm")
-                self.get_logger().error(message)
-                return False, message
+            last_result = None
+            for _ in range(self.ARM_RETRY_COUNT):
+                arm_req = CommandBool.Request(value=True)
+                arm_resp = await self.arm_cli.call_async(arm_req)
+                last_result = getattr(arm_resp, "result", None) if arm_resp is not None else None
+                if arm_resp and arm_resp.success:
+                    time.sleep(self.COMMAND_RETRY_DELAY_SEC)
+                    return True, ""
+                if self.current_state.armed:
+                    return True, ""
+                time.sleep(self.COMMAND_RETRY_DELAY_SEC)
+            message = self._status(
+                "E_ARM_FAILED",
+                f"Failed to arm (last_result={last_result}, mode={self.current_state.mode})",
+            )
+            self.get_logger().error(message)
+            return False, message
 
         return True, ""
 

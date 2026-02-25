@@ -39,6 +39,8 @@ def generate_launch_description():
             {"depth_topic": "/camera/camera/aligned_depth_to_color/image_raw"},
             {"camera_info_topic": "/camera/camera/color/camera_info"},
             {"map_frame": "map"},
+            {"max_sync_gap_sec": 0.20},
+            {"allow_stale_depth_fallback": True},
             {"bbox_input_rotated_180": True},
         ],
     )

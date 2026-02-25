@@ -25,6 +25,7 @@ class BBoxProjectionNode(Node):
         self.declare_parameter("depth_history_size", 5)
         self.declare_parameter("min_valid_ratio", 0.25)
         self.declare_parameter("max_sync_gap_sec", 0.20)
+        self.declare_parameter("allow_stale_depth_fallback", True)
         self.declare_parameter("bbox_input_rotated_180", False)
 
         depth_topic = self.get_parameter("depth_topic").get_parameter_value().string_value
@@ -175,17 +176,19 @@ class BBoxProjectionNode(Node):
 
     def _select_depth_history(
         self, request: ProjectBBoxTo3D.Request, depth_history: list[tuple[np.ndarray, str, int]]
-    ) -> tuple[list[tuple[np.ndarray, str, int]] | None, float]:
+    ) -> tuple[list[tuple[np.ndarray, str, int]] | None, float, bool]:
         target_ns = self._request_stamp_ns(request)
         if target_ns <= 0:
-            return depth_history, 0.0
+            return depth_history, 0.0, False
 
         best = min(depth_history, key=lambda item: abs(item[2] - target_ns))
         sync_gap_sec = abs(best[2] - target_ns) / 1_000_000_000.0
         max_sync_gap = float(self.get_parameter("max_sync_gap_sec").value)
         if sync_gap_sec > max_sync_gap:
-            return None, sync_gap_sec
-        return [best], sync_gap_sec
+            if bool(self.get_parameter("allow_stale_depth_fallback").value):
+                return [depth_history[-1]], sync_gap_sec, True
+            return None, sync_gap_sec, False
+        return [best], sync_gap_sec, False
 
     @staticmethod
     def _clamp_bbox(
@@ -258,7 +261,9 @@ class BBoxProjectionNode(Node):
             )
             return response
 
-        selected_history, sync_gap_sec = self._select_depth_history(request, depth_history)
+        selected_history, sync_gap_sec, used_stale_fallback = self._select_depth_history(
+            request, depth_history
+        )
         if selected_history is None:
             max_sync_gap = float(self.get_parameter("max_sync_gap_sec").value)
             response.success = False
@@ -372,7 +377,16 @@ class BBoxProjectionNode(Node):
             return response
 
         response.success = True
-        response.message = self._status("OK_BBOX_PROJECTED", "BBox projected to map frame")
+        if used_stale_fallback:
+            response.message = self._status(
+                "OK_BBOX_PROJECTED_STALE",
+                (
+                    "BBox projected with latest depth fallback "
+                    f"(sync_gap={sync_gap_sec:.3f}s)"
+                ),
+            )
+        else:
+            response.message = self._status("OK_BBOX_PROJECTED", "BBox projected to map frame")
         response.position.x = float(x_map)
         response.position.y = float(y_map)
         response.position.z = float(z_map)

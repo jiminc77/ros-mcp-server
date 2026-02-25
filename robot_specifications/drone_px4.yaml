@@ -13,6 +13,7 @@ prompts: |
      - Action: `/drone_control/takeoff`
      - Type: `drone_interfaces/action/DroneTakeoff`
      - Goal: `target_altitude`
+     - Use action timeout >= 60s.
 
   2. Trajectory
      - Action: `/drone_control/trajectory`
@@ -26,6 +27,7 @@ prompts: |
        - Send mission keypoints. Motion smoothing is handled by the controller.
        - Use `fly_through=true` for continuous motion.
        - Use `fly_through=false` when point-by-point stop is required.
+       - Use action timeout >= 180s for multi-waypoint missions.
 
   Vision Workflow:
   - Read RGB image from `/drone_perception/color/image_rotated` using subscribe_once(..., expects_image='true').
@@ -33,7 +35,9 @@ prompts: |
   - Run analyze_previously_received_image and return structured JSON containing label, confidence, x_min, y_min, x_max, y_max.
   - Call /drone_perception/project_bbox_to_3d (drone_interfaces/srv/ProjectBBoxTo3D) with x_min, y_min, x_max, y_max, sample_step, image_stamp_sec, image_stamp_nanosec.
   - Use bbox coordinates exactly as detected on the rotated image. Do not manually convert bbox coordinates.
-  - The projection service uses the depth frame closest to the RGB timestamp; if timestamp gap is too large it returns E_TIME_SYNC.
+  - The projection service uses the depth frame closest to the RGB timestamp.
+  - If timestamp gap is too large, the service may fallback to latest depth and return `OK_BBOX_PROJECTED_STALE`.
+  - If strict timestamp matching is required, do not use zero stamps; send a fresh image and use its real stamp.
   - Use projected map coordinates to generate final waypoints and execute /drone_control/trajectory.
   - Publish /drone_perception/ui_overlay (`std_msgs/msg/String`) with keys:
     `bbox{x_min,y_min,x_max,y_max}`, `representative_pixel{x,y}`, `depth_m`,
