@@ -4,6 +4,8 @@ int32 y_min
 int32 x_max
 int32 y_max
 int32 sample_step
+int32 image_stamp_sec
+uint32 image_stamp_nanosec
 ---
 # Response
 bool success

@@ -24,6 +24,8 @@ class BBoxProjectionNode(Node):
         self.declare_parameter("default_window_size", 5)
         self.declare_parameter("depth_history_size", 5)
         self.declare_parameter("min_valid_ratio", 0.25)
+        self.declare_parameter("max_sync_gap_sec", 0.20)
+        self.declare_parameter("bbox_input_rotated_180", False)
 
         depth_topic = self.get_parameter("depth_topic").get_parameter_value().string_value
         camera_info_topic = self.get_parameter("camera_info_topic").get_parameter_value().string_value
@@ -34,7 +36,7 @@ class BBoxProjectionNode(Node):
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
         self._lock = threading.Lock()
-        self._depth_history: deque[tuple[np.ndarray, str]] = deque(maxlen=depth_history_size)
+        self._depth_history: deque[tuple[np.ndarray, str, int]] = deque(maxlen=depth_history_size)
         self._latest_camera_info: CameraInfo | None = None
 
         self.create_subscription(Image, depth_topic, self._depth_cb, qos_profile_sensor_data)
@@ -57,7 +59,9 @@ class BBoxProjectionNode(Node):
             return
 
         with self._lock:
-            self._depth_history.append((depth, msg.encoding))
+            stamp = msg.header.stamp
+            stamp_ns = int(stamp.sec) * 1_000_000_000 + int(stamp.nanosec)
+            self._depth_history.append((depth, msg.encoding, stamp_ns))
 
     def _camera_info_cb(self, msg: CameraInfo) -> None:
         with self._lock:
@@ -110,13 +114,13 @@ class BBoxProjectionNode(Node):
         return depth
 
     def _average_patch_from_history(
-        self, depth_history: list[tuple[np.ndarray, str]], ys: np.ndarray, xs: np.ndarray
+        self, depth_history: list[tuple[np.ndarray, str, int]], ys: np.ndarray, xs: np.ndarray
     ) -> np.ndarray | None:
         patches = []
         y_max = int(ys[-1])
         x_max = int(xs[-1])
 
-        for depth_img, encoding in depth_history:
+        for depth_img, encoding, _ in depth_history:
             h, w = depth_img.shape[:2]
             if y_max >= h or x_max >= w:
                 continue
@@ -142,13 +146,13 @@ class BBoxProjectionNode(Node):
         self,
         pixel_x: int,
         pixel_y: int,
-        depth_history: list[tuple[np.ndarray, str]],
+        depth_history: list[tuple[np.ndarray, str, int]],
         window_size: int,
     ) -> tuple[float | None, float]:
         depths = []
         valid_ratios = []
 
-        for depth_img, encoding in depth_history:
+        for depth_img, encoding, _ in depth_history:
             depth_m, valid_ratio = self._extract_depth_m(
                 pixel_x, pixel_y, depth_img, encoding, window_size
             )
@@ -164,6 +168,48 @@ class BBoxProjectionNode(Node):
             return None, avg_valid_ratio
 
         return float(sum(depths) / len(depths)), avg_valid_ratio
+
+    @staticmethod
+    def _request_stamp_ns(request: ProjectBBoxTo3D.Request) -> int:
+        return int(request.image_stamp_sec) * 1_000_000_000 + int(request.image_stamp_nanosec)
+
+    def _select_depth_history(
+        self, request: ProjectBBoxTo3D.Request, depth_history: list[tuple[np.ndarray, str, int]]
+    ) -> tuple[list[tuple[np.ndarray, str, int]] | None, float]:
+        target_ns = self._request_stamp_ns(request)
+        if target_ns <= 0:
+            return depth_history, 0.0
+
+        best = min(depth_history, key=lambda item: abs(item[2] - target_ns))
+        sync_gap_sec = abs(best[2] - target_ns) / 1_000_000_000.0
+        max_sync_gap = float(self.get_parameter("max_sync_gap_sec").value)
+        if sync_gap_sec > max_sync_gap:
+            return None, sync_gap_sec
+        return [best], sync_gap_sec
+
+    @staticmethod
+    def _clamp_bbox(
+        x_min: int, y_min: int, x_max: int, y_max: int, width: int, height: int
+    ) -> tuple[int, int, int, int]:
+        x0 = max(0, min(min(x_min, x_max), width - 1))
+        y0 = max(0, min(min(y_min, y_max), height - 1))
+        x1 = max(0, min(max(x_min, x_max), width - 1))
+        y1 = max(0, min(max(y_min, y_max), height - 1))
+        return x0, y0, x1, y1
+
+    @staticmethod
+    def _bbox_rotated_to_raw(
+        x_min: int, y_min: int, x_max: int, y_max: int, width: int, height: int
+    ) -> tuple[int, int, int, int]:
+        raw_x_min = (width - 1) - x_max
+        raw_x_max = (width - 1) - x_min
+        raw_y_min = (height - 1) - y_max
+        raw_y_max = (height - 1) - y_min
+        return raw_x_min, raw_y_min, raw_x_max, raw_y_max
+
+    @staticmethod
+    def _pixel_raw_to_rotated(px: int, py: int, width: int, height: int) -> tuple[int, int]:
+        return (width - 1) - px, (height - 1) - py
 
     @staticmethod
     def _rotate_vector_by_quat(
@@ -199,7 +245,7 @@ class BBoxProjectionNode(Node):
         self, request: ProjectBBoxTo3D.Request, response: ProjectBBoxTo3D.Response
     ):
         with self._lock:
-            depth_history = [(d.copy(), enc) for d, enc in self._depth_history]
+            depth_history = [(d.copy(), enc, ts_ns) for d, enc, ts_ns in self._depth_history]
             camera_info = self._latest_camera_info
 
         map_frame = self.get_parameter("map_frame").get_parameter_value().string_value
@@ -212,12 +258,30 @@ class BBoxProjectionNode(Node):
             )
             return response
 
-        latest_depth = depth_history[-1][0]
+        selected_history, sync_gap_sec = self._select_depth_history(request, depth_history)
+        if selected_history is None:
+            max_sync_gap = float(self.get_parameter("max_sync_gap_sec").value)
+            response.success = False
+            response.message = self._status(
+                "E_TIME_SYNC",
+                (
+                    f"No depth frame near image stamp "
+                    f"(gap={sync_gap_sec:.3f}s, max={max_sync_gap:.3f}s)"
+                ),
+            )
+            return response
+
+        latest_depth = selected_history[-1][0]
         h, w = latest_depth.shape[:2]
-        x0 = max(0, min(int(request.x_min), int(request.x_max)))
-        y0 = max(0, min(int(request.y_min), int(request.y_max)))
-        x1 = min(w - 1, max(int(request.x_min), int(request.x_max)))
-        y1 = min(h - 1, max(int(request.y_min), int(request.y_max)))
+        x0_in, y0_in, x1_in, y1_in = self._clamp_bbox(
+            int(request.x_min), int(request.y_min), int(request.x_max), int(request.y_max), w, h
+        )
+        use_rotated_bbox = bool(self.get_parameter("bbox_input_rotated_180").value)
+        if use_rotated_bbox:
+            x0, y0, x1, y1 = self._bbox_rotated_to_raw(x0_in, y0_in, x1_in, y1_in, w, h)
+            x0, y0, x1, y1 = self._clamp_bbox(x0, y0, x1, y1, w, h)
+        else:
+            x0, y0, x1, y1 = x0_in, y0_in, x1_in, y1_in
 
         if x0 > x1 or y0 > y1:
             response.success = False
@@ -233,7 +297,7 @@ class BBoxProjectionNode(Node):
             response.message = self._status("E_INVALID_BBOX", "Empty bbox after sampling")
             return response
 
-        patch_m = self._average_patch_from_history(depth_history, ys, xs)
+        patch_m = self._average_patch_from_history(selected_history, ys, xs)
         if patch_m is None:
             response.success = False
             response.message = self._status("E_DATA_NOT_READY", "No usable depth frames in buffer")
@@ -269,7 +333,7 @@ class BBoxProjectionNode(Node):
 
         window_size = self._resolve_window_size(0)
         depth_m, local_ratio = self._extract_depth_from_history(
-            rep_x, rep_y, depth_history, window_size
+            rep_x, rep_y, selected_history, window_size
         )
         if depth_m is None:
             depth_m = median_depth
@@ -312,8 +376,12 @@ class BBoxProjectionNode(Node):
         response.position.x = float(x_map)
         response.position.y = float(y_map)
         response.position.z = float(z_map)
-        response.representative_pixel_x = rep_x
-        response.representative_pixel_y = rep_y
+        if use_rotated_bbox:
+            rep_x_out, rep_y_out = self._pixel_raw_to_rotated(rep_x, rep_y, w, h)
+        else:
+            rep_x_out, rep_y_out = rep_x, rep_y
+        response.representative_pixel_x = int(rep_x_out)
+        response.representative_pixel_y = int(rep_y_out)
         response.depth_m = float(depth_m)
         response.confidence = float(confidence)
         return response

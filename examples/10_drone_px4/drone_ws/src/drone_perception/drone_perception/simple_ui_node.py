@@ -14,7 +14,7 @@ class SimpleUiNode(Node):
     def __init__(self):
         super().__init__("simple_ui")
 
-        self.declare_parameter("color_topic", "/camera/camera/color/image_raw")
+        self.declare_parameter("color_topic", "/drone_perception/color/image_rotated")
         self.declare_parameter("overlay_topic", "/drone_perception/ui_overlay")
         self.declare_parameter("window_name", "Drone UI")
 

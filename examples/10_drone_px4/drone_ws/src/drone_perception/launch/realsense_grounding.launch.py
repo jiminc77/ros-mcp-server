@@ -39,6 +39,19 @@ def generate_launch_description():
             {"depth_topic": "/camera/camera/aligned_depth_to_color/image_raw"},
             {"camera_info_topic": "/camera/camera/color/camera_info"},
             {"map_frame": "map"},
+            {"bbox_input_rotated_180": True},
+        ],
+    )
+
+    image_rotator_node = Node(
+        package="drone_perception",
+        executable="image_rotator",
+        name="image_rotator",
+        output="screen",
+        parameters=[
+            {"input_topic": "/camera/camera/color/image_raw"},
+            {"output_topic": "/drone_perception/color/image_rotated"},
+            {"rotate_180": True},
         ],
     )
 
@@ -64,6 +77,7 @@ def generate_launch_description():
             start_realsense_arg,
             realsense_launch,
             mount_tf_node,
+            image_rotator_node,
             grounding_node,
         ]
     )

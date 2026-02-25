@@ -1,4 +1,3 @@
-import asyncio
 import math
 import time
 from threading import Lock
@@ -53,7 +52,7 @@ class DroneMCPBridge(Node):
         )
         self.local_pos_param_cli = AsyncParameterClient(self, "/mavros/local_position")
         self._local_pos_param_pending = False
-        self._local_pos_param_ready = False
+        self._local_pos_param_configured = False
         self._local_pos_param_attempts = 0
         self._local_pos_param_last_try = 0.0
 
@@ -89,11 +88,8 @@ class DroneMCPBridge(Node):
 
     def state_cb(self, msg: State) -> None:
         self.current_state = msg
-        self.ensure_local_position_tf_params()
 
     def local_cb(self, msg: PoseStamped) -> None:
-        self.ensure_local_position_tf_params()
-
         self.current_pose = msg
         if not self.is_primed:
             self.target_pose.pose.position.x = msg.pose.position.x
@@ -164,9 +160,9 @@ class DroneMCPBridge(Node):
             return
 
         if results and all(r.successful for r in results):
-            if not self._local_pos_param_ready:
+            if not self._local_pos_param_configured:
                 self.get_logger().info("MAVROS local_position TF params set (tf.send=true)")
-            self._local_pos_param_ready = True
+            self._local_pos_param_configured = True
 
     def _claim_goal(self, name: str) -> tuple[bool, str]:
         if not self._goal_lock.acquire(blocking=False):
@@ -224,7 +220,7 @@ class DroneMCPBridge(Node):
                 message = self._status("E_OFFBOARD_SET_FAILED", "Failed to set OFFBOARD mode")
                 self.get_logger().error(message)
                 return False, message
-            await asyncio.sleep(0.5)
+            time.sleep(0.5)
 
         if not self.current_state.armed:
             arm_req = CommandBool.Request(value=True)
@@ -293,7 +289,7 @@ class DroneMCPBridge(Node):
                         message=self._status("E_TAKEOFF_TIMEOUT", "Takeoff timeout"),
                     )
 
-                await asyncio.sleep(0.1)
+                time.sleep(0.1)
 
             goal_handle.abort()
             return DroneTakeoff.Result(
@@ -406,10 +402,10 @@ class DroneMCPBridge(Node):
                             ),
                         )
 
-                    await asyncio.sleep(self.CONTROL_DT)
+                    time.sleep(self.CONTROL_DT)
 
                 if not req.fly_through:
-                    await asyncio.sleep(self.HOLD_TIME_SEC)
+                    time.sleep(self.HOLD_TIME_SEC)
 
             goal_handle.succeed()
             return DroneTrajectory.Result(
