@@ -23,8 +23,10 @@ def generate_launch_description():
                 parameters=[
                     # ADJUST THESE FOR REAL DRONE
                     {"fcu_url": "serial:///dev/ttyUSB0:57600"},
-                    {"system_id": 1},
-                    {"component_id": 1},
+                    {"system_id": 255},
+                    {"component_id": 190},
+                    {"target_system_id": 1},
+                    {"target_component_id": 1},
                 ],
             ),
             # Bridge Node

@@ -22,8 +22,8 @@ def generate_launch_description():
                 output="screen",
                 parameters=[
                     {"fcu_url": "udp://:14540@127.0.0.1:14557"},
-                    {"system_id": 1},
-                    {"component_id": 1},
+                    {"system_id": 255},
+                    {"component_id": 190},
                     {"target_system_id": 1},
                     {"target_component_id": 1},
                 ],
