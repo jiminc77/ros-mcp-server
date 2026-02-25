@@ -1,5 +1,5 @@
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, TimerAction
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -7,6 +7,22 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     use_perception = LaunchConfiguration("use_perception")
+    force_tf_send_true = TimerAction(
+        period=2.0,
+        actions=[
+            ExecuteProcess(
+                cmd=[
+                    "bash",
+                    "-lc",
+                    "for i in {1..20}; do "
+                    "ros2 param set /mavros/local_position tf.send true && exit 0; "
+                    "sleep 0.5; "
+                    "done; exit 1",
+                ],
+                output="screen",
+            )
+        ],
+    )
 
     return LaunchDescription(
         [
@@ -27,6 +43,7 @@ def generate_launch_description():
                     {"component_id": 1},
                 ],
             ),
+            force_tf_send_true,
             # Bridge Node
             Node(
                 package="drone_controller",
