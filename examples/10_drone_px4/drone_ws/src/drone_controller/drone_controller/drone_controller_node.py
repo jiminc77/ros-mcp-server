@@ -55,6 +55,7 @@ class DroneMCPBridge(Node):
         self._local_pos_param_pending = False
         self._local_pos_param_ready = False
         self._local_pos_param_attempts = 0
+        self._local_pos_param_last_try = 0.0
 
         self._action_takeoff = ActionServer(
             self,
@@ -88,12 +89,10 @@ class DroneMCPBridge(Node):
 
     def state_cb(self, msg: State) -> None:
         self.current_state = msg
-        if not self._local_pos_param_ready:
-            self.ensure_local_position_tf_params()
+        self.ensure_local_position_tf_params()
 
     def local_cb(self, msg: PoseStamped) -> None:
-        if not self._local_pos_param_ready:
-            self.ensure_local_position_tf_params()
+        self.ensure_local_position_tf_params()
 
         self.current_pose = msg
         if not self.is_primed:
@@ -108,6 +107,8 @@ class DroneMCPBridge(Node):
             )
 
     def timer_callback(self) -> None:
+        self.ensure_local_position_tf_params()
+
         if not self.is_primed:
             return
 
@@ -115,7 +116,10 @@ class DroneMCPBridge(Node):
         self.local_pos_pub.publish(self.target_pose)
 
     def ensure_local_position_tf_params(self) -> None:
-        if self._local_pos_param_ready or self._local_pos_param_pending:
+        if self._local_pos_param_pending:
+            return
+        now = time.monotonic()
+        if now - self._local_pos_param_last_try < 2.0:
             return
 
         params = [
@@ -124,6 +128,7 @@ class DroneMCPBridge(Node):
             Parameter("tf.child_frame_id", Parameter.Type.STRING, "base_link"),
         ]
         self._local_pos_param_attempts += 1
+        self._local_pos_param_last_try = now
         self._local_pos_param_pending = True
         try:
             future = self.local_pos_param_cli.set_parameters(params)
@@ -159,8 +164,9 @@ class DroneMCPBridge(Node):
             return
 
         if results and all(r.successful for r in results):
+            if not self._local_pos_param_ready:
+                self.get_logger().info("MAVROS local_position TF params set (tf.send=true)")
             self._local_pos_param_ready = True
-            self.get_logger().info("MAVROS local_position TF params set (tf.send=true)")
 
     def _claim_goal(self, name: str) -> tuple[bool, str]:
         if not self._goal_lock.acquire(blocking=False):
