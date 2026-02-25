@@ -27,9 +27,6 @@ class DroneMCPBridge(Node):
     WAYPOINT_TIMEOUT_SEC = 120.0
     HOLD_TIME_SEC = 0.5
     OFFBOARD_PRIME_SEC = 1.0
-    COMMAND_RETRY_DELAY_SEC = 0.2
-    MODE_RETRY_COUNT = 5
-    ARM_RETRY_COUNT = 10
 
     def __init__(self):
         super().__init__("drone_mcp_bridge")
@@ -226,41 +223,28 @@ class DroneMCPBridge(Node):
             time.sleep(self.CONTROL_DT)
 
         if self.current_state.mode != "OFFBOARD":
-            mode_set = False
-            for _ in range(self.MODE_RETRY_COUNT):
-                mode_req = SetMode.Request(custom_mode="OFFBOARD")
-                mode_resp = await self.mode_cli.call_async(mode_req)
-                if mode_resp and mode_resp.mode_sent:
-                    mode_set = True
-                if self.current_state.mode == "OFFBOARD":
-                    mode_set = True
-                    break
-                time.sleep(self.COMMAND_RETRY_DELAY_SEC)
+            mode_req = SetMode.Request(custom_mode="OFFBOARD")
+            mode_resp = await self.mode_cli.call_async(mode_req)
+            mode_set = bool(mode_resp and mode_resp.mode_sent) or self.current_state.mode == "OFFBOARD"
             if not mode_set:
                 message = self._status(
-                    "E_OFFBOARD_SET_FAILED", "Failed to set OFFBOARD mode after retries"
+                    "E_OFFBOARD_SET_FAILED", "Failed to set OFFBOARD mode"
                 )
                 self.get_logger().error(message)
                 return False, message
 
         if not self.current_state.armed:
-            last_result = None
-            for _ in range(self.ARM_RETRY_COUNT):
-                arm_req = CommandBool.Request(value=True)
-                arm_resp = await self.arm_cli.call_async(arm_req)
+            arm_req = CommandBool.Request(value=True)
+            arm_resp = await self.arm_cli.call_async(arm_req)
+            arm_ok = bool(arm_resp and arm_resp.success) or self.current_state.armed
+            if not arm_ok:
                 last_result = getattr(arm_resp, "result", None) if arm_resp is not None else None
-                if arm_resp and arm_resp.success:
-                    time.sleep(self.COMMAND_RETRY_DELAY_SEC)
-                    return True, ""
-                if self.current_state.armed:
-                    return True, ""
-                time.sleep(self.COMMAND_RETRY_DELAY_SEC)
-            message = self._status(
-                "E_ARM_FAILED",
-                f"Failed to arm (last_result={last_result}, mode={self.current_state.mode})",
-            )
-            self.get_logger().error(message)
-            return False, message
+                message = self._status(
+                    "E_ARM_FAILED",
+                    f"Failed to arm (last_result={last_result}, mode={self.current_state.mode})",
+                )
+                self.get_logger().error(message)
+                return False, message
 
         return True, ""
 
