@@ -1,4 +1,5 @@
 from collections import deque
+import json
 import threading
 
 import numpy as np
@@ -10,6 +11,7 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from rclpy.time import Time
 from sensor_msgs.msg import CameraInfo, Image
+from std_msgs.msg import String
 from tf2_ros import Buffer, TransformException, TransformListener
 
 
@@ -27,9 +29,11 @@ class BBoxProjectionNode(Node):
         self.declare_parameter("max_sync_gap_sec", 0.20)
         self.declare_parameter("allow_stale_depth_fallback", True)
         self.declare_parameter("bbox_input_rotated_180", False)
+        self.declare_parameter("overlay_topic", "/drone_perception/ui_overlay")
 
         depth_topic = self.get_parameter("depth_topic").get_parameter_value().string_value
         camera_info_topic = self.get_parameter("camera_info_topic").get_parameter_value().string_value
+        overlay_topic = self.get_parameter("overlay_topic").get_parameter_value().string_value
         depth_history_size = max(1, int(self.get_parameter("depth_history_size").value))
 
         self.bridge = CvBridge()
@@ -44,6 +48,7 @@ class BBoxProjectionNode(Node):
         self.create_subscription(
             CameraInfo, camera_info_topic, self._camera_info_cb, qos_profile_sensor_data
         )
+        self._overlay_pub = self.create_publisher(String, overlay_topic, 10)
 
         self.create_service(
             ProjectBBoxTo3D,
@@ -107,6 +112,65 @@ class BBoxProjectionNode(Node):
     @staticmethod
     def _status(code: str, detail: str) -> str:
         return f"{code}: {detail}"
+
+    @staticmethod
+    def _split_status(status: str) -> tuple[str, str]:
+        if ": " in status:
+            code, detail = status.split(": ", 1)
+            return code.strip(), detail.strip()
+        return status.strip(), status.strip()
+
+    @staticmethod
+    def _bbox_from_request(request: ProjectBBoxTo3D.Request) -> dict:
+        return {
+            "x_min": int(request.x_min),
+            "y_min": int(request.y_min),
+            "x_max": int(request.x_max),
+            "y_max": int(request.y_max),
+        }
+
+    def _publish_overlay(self, payload: dict) -> None:
+        msg = String()
+        try:
+            msg.data = json.dumps(payload, separators=(",", ":"))
+        except Exception as exc:
+            self.get_logger().warn(f"Failed to encode overlay JSON: {exc}")
+            return
+        self._overlay_pub.publish(msg)
+
+    def _publish_failure_overlay(self, request: ProjectBBoxTo3D.Request, message: str) -> None:
+        code, detail = self._split_status(message)
+        self._publish_overlay(
+            {
+                "bbox": self._bbox_from_request(request),
+                "error_code": code,
+                "error_message": detail,
+            }
+        )
+
+    def _publish_success_overlay(
+        self, request: ProjectBBoxTo3D.Request, response: ProjectBBoxTo3D.Response
+    ) -> None:
+        code, detail = self._split_status(response.message)
+        self._publish_overlay(
+            {
+                "bbox": self._bbox_from_request(request),
+                "representative_pixel": {
+                    "x": int(response.representative_pixel_x),
+                    "y": int(response.representative_pixel_y),
+                },
+                "depth_m": float(response.depth_m),
+                "confidence": float(response.confidence),
+                "object_map": {
+                    "x": float(response.position.x),
+                    "y": float(response.position.y),
+                    "z": float(response.position.z),
+                    "frame_id": response.frame_id,
+                },
+                "status_code": code,
+                "status_message": detail,
+            }
+        )
 
     def _to_meters(self, raw_depth: np.ndarray, encoding: str) -> np.ndarray:
         depth = raw_depth.astype(np.float32)
@@ -259,6 +323,7 @@ class BBoxProjectionNode(Node):
             response.message = self._status(
                 "E_DATA_NOT_READY", "Depth/CameraInfo data is not ready yet"
             )
+            self._publish_failure_overlay(request, response.message)
             return response
 
         selected_history, sync_gap_sec, used_stale_fallback = self._select_depth_history(
@@ -274,6 +339,7 @@ class BBoxProjectionNode(Node):
                     f"(gap={sync_gap_sec:.3f}s, max={max_sync_gap:.3f}s)"
                 ),
             )
+            self._publish_failure_overlay(request, response.message)
             return response
 
         latest_depth = selected_history[-1][0]
@@ -291,6 +357,7 @@ class BBoxProjectionNode(Node):
         if x0 > x1 or y0 > y1:
             response.success = False
             response.message = self._status("E_INVALID_BBOX", "Invalid bbox range")
+            self._publish_failure_overlay(request, response.message)
             return response
 
         requested_step = int(request.sample_step)
@@ -300,12 +367,14 @@ class BBoxProjectionNode(Node):
         if ys.size == 0 or xs.size == 0:
             response.success = False
             response.message = self._status("E_INVALID_BBOX", "Empty bbox after sampling")
+            self._publish_failure_overlay(request, response.message)
             return response
 
         patch_m = self._average_patch_from_history(selected_history, ys, xs)
         if patch_m is None:
             response.success = False
             response.message = self._status("E_DATA_NOT_READY", "No usable depth frames in buffer")
+            self._publish_failure_overlay(request, response.message)
             return response
 
         valid_mask = np.isfinite(patch_m) & (patch_m > 0.0)
@@ -324,6 +393,7 @@ class BBoxProjectionNode(Node):
                 ),
             )
             response.confidence = float(valid_ratio)
+            self._publish_failure_overlay(request, response.message)
             return response
 
         grid_y, grid_x = np.meshgrid(ys, xs, indexing="ij")
@@ -351,6 +421,7 @@ class BBoxProjectionNode(Node):
         if fx == 0.0 or fy == 0.0:
             response.success = False
             response.message = self._status("E_CAMERA_INTRINSICS", "Camera intrinsics are invalid")
+            self._publish_failure_overlay(request, response.message)
             return response
 
         x_cam = (rep_x - cx) * depth_m / fx
@@ -365,6 +436,7 @@ class BBoxProjectionNode(Node):
             response.message = self._status(
                 "E_CAMERA_FRAME", "Camera frame is empty in CameraInfo and camera_frame parameter"
             )
+            self._publish_failure_overlay(request, response.message)
             return response
 
         try:
@@ -374,6 +446,7 @@ class BBoxProjectionNode(Node):
             response.message = self._status(
                 "E_TF_LOOKUP", f"TF lookup failed ({source_frame} -> {map_frame}): {exc}"
             )
+            self._publish_failure_overlay(request, response.message)
             return response
 
         response.success = True
@@ -398,6 +471,7 @@ class BBoxProjectionNode(Node):
         response.representative_pixel_y = int(rep_y_out)
         response.depth_m = float(depth_m)
         response.confidence = float(confidence)
+        self._publish_success_overlay(request, response)
         return response
 
 

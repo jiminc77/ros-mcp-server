@@ -123,7 +123,18 @@ class SimpleUiNode(Node):
                 values = tuple(bbox[k] for k in keys)
                 break
         if values is None:
-            return None
+            # Also accept x/y/w/h style boxes.
+            if all(k in bbox for k in ("x", "y", "w", "h")):
+                try:
+                    x = float(bbox["x"])
+                    y = float(bbox["y"])
+                    w_box = float(bbox["w"])
+                    h_box = float(bbox["h"])
+                except Exception:
+                    return None
+                values = (x, y, x + w_box, y + h_box)
+            else:
+                return None
 
         try:
             x_min, y_min, x_max, y_max = [float(v) for v in values]
