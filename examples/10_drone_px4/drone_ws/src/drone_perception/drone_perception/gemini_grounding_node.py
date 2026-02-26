@@ -4,6 +4,7 @@ import json
 import os
 import re
 import threading
+import time
 from urllib import error as url_error
 from urllib import request as url_request
 
@@ -41,11 +42,13 @@ class GeminiGroundingNode(Node):
         self.declare_parameter("map_frame", "map")
         self.declare_parameter("camera_frame", "")
 
-        self.declare_parameter("gemini_model", "gemini-3.1-pro-preview")
+        self.declare_parameter("gemini_model", "gemini-3.0-flash-preview")
         self.declare_parameter("gemini_api_key_env", "GEMINI_API_KEY")
         self.declare_parameter("gemini_temperature", 0.1)
         self.declare_parameter("request_timeout_sec", 15.0)
-        self.declare_parameter("min_confidence", 0.10)
+        self.declare_parameter("min_confidence", 0.5)
+        self.declare_parameter("publish_retries", 12)
+        self.declare_parameter("publish_retry_interval_sec", 0.2)
 
         color_topic_raw = str(self.get_parameter("color_topic_raw").value)
         color_rotated_topic = str(self.get_parameter("color_rotated_topic").value)
@@ -146,6 +149,19 @@ class GeminiGroundingNode(Node):
             return
 
         self._publish_overlay({"label": query, "status_code": "RUNNING", "status_message": "Processing"})
+        self._publish_result(
+            {
+                "query": query,
+                "generation": int(generation),
+                "status": "running",
+                "status_code": "RUNNING",
+                "status_message": "Vision grounding in progress",
+                "image_stamp": {
+                    "sec": int(stamp_sec),
+                    "nanosec": int(stamp_nanosec),
+                },
+            }
+        )
 
         threading.Thread(
             target=self._process_query,
@@ -528,13 +544,24 @@ class GeminiGroundingNode(Node):
         return (width - 1) - px, (height - 1) - py
 
     def _publish_json(self, publisher, payload: dict) -> None:
-        msg = String()
         try:
-            msg.data = json.dumps(payload, separators=(",", ":"))
+            encoded = json.dumps(payload, separators=(",", ":"))
         except Exception as exc:
             self.get_logger().warn(f"Failed to encode JSON payload: {exc}")
             return
-        publisher.publish(msg)
+
+        retries = max(1, int(self.get_parameter("publish_retries").value))
+        interval_sec = max(0.0, float(self.get_parameter("publish_retry_interval_sec").value))
+
+        def _worker() -> None:
+            for i in range(retries):
+                msg = String()
+                msg.data = encoded
+                publisher.publish(msg)
+                if i + 1 < retries and interval_sec > 0.0:
+                    time.sleep(interval_sec)
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _publish_overlay(self, payload: dict) -> None:
         self._publish_json(self._overlay_pub, payload)
