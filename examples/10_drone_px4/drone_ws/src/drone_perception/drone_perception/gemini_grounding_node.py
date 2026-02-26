@@ -42,7 +42,7 @@ class GeminiGroundingNode(Node):
         self.declare_parameter("map_frame", "map")
         self.declare_parameter("camera_frame", "")
 
-        self.declare_parameter("gemini_model", "gemini-3.0-flash-preview")
+        self.declare_parameter("gemini_model", "gemini-3.0-flash")
         self.declare_parameter("gemini_api_key_env", "GEMINI_API_KEY")
         self.declare_parameter("gemini_temperature", 0.1)
         self.declare_parameter("request_timeout_sec", 15.0)
@@ -52,7 +52,7 @@ class GeminiGroundingNode(Node):
 
         color_topic_raw = str(self.get_parameter("color_topic_raw").value)
         color_rotated_topic = str(self.get_parameter("color_rotated_topic").value)
-        depth_topic = str(self.get_parameter("depth_topic").value)
+        depth_topic = str(self.get_parameter("depth_topic"ㄴ).value)
         camera_info_topic = str(self.get_parameter("camera_info_topic").value)
         query_topic = str(self.get_parameter("query_topic").value)
         overlay_topic = str(self.get_parameter("overlay_topic").value)

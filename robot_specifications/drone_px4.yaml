@@ -36,6 +36,9 @@ prompts: |
     3) If `status='running'`, wait and read `/drone_perception/object_result` again.
     4) If `status='success'`, use `object_map` to generate waypoint.
     5) If `status='error'`, report `status_code/status_message` to user.
+  - Never publish directly to `/drone_perception/object_result` or `/drone_perception/ui_overlay`.
+  - Never run manual image vision chains (`subscribe_once` camera + `analyze_previously_received_image`) for grounding decisions.
+  - For any object-detection request, always use `/drone_perception/object_query`.
   - Vision processing is handled by one node (`gemini_grounding`) end-to-end:
     rotated RGB -> Gemini bbox/caption -> same-stamp depth patch median -> map projection -> object_result.
   - Main control logic must not run raw vision/projection steps directly.
