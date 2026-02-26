@@ -40,7 +40,7 @@ class GeminiGroundingNode(Node):
         self.declare_parameter("map_frame", "map")
         self.declare_parameter("camera_frame", "")
 
-        self.declare_parameter("gemini_model", "gemini-2.5-flash")
+        self.declare_parameter("gemini_model", "gemini-3.1-pro-preview")
         self.declare_parameter("gemini_api_key_env", "GEMINI_API_KEY")
         self.declare_parameter("gemini_temperature", 0.1)
         self.declare_parameter("request_timeout_sec", 15.0)
