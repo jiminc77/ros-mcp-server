@@ -30,30 +30,26 @@ def generate_launch_description():
         condition=IfCondition(start_realsense),
     )
 
-    grounding_node = Node(
+    gemini_grounding_node = Node(
         package="drone_perception",
-        executable="bbox_projection",
-        name="bbox_projection",
+        executable="gemini_grounding",
+        name="gemini_grounding",
         output="screen",
         parameters=[
+            {"color_topic_raw": "/camera/camera/color/image_raw"},
+            {"color_rotated_topic": "/drone_perception/color/image_rotated"},
             {"depth_topic": "/camera/camera/aligned_depth_to_color/image_raw"},
             {"camera_info_topic": "/camera/camera/color/camera_info"},
-            {"map_frame": "map"},
-            {"max_sync_gap_sec": 0.20},
-            {"allow_stale_depth_fallback": True},
-            {"bbox_input_rotated_180": True},
-        ],
-    )
-
-    image_rotator_node = Node(
-        package="drone_perception",
-        executable="image_rotator",
-        name="image_rotator",
-        output="screen",
-        parameters=[
-            {"input_topic": "/camera/camera/color/image_raw"},
-            {"output_topic": "/drone_perception/color/image_rotated"},
+            {"query_topic": "/drone_perception/object_query"},
+            {"overlay_topic": "/drone_perception/ui_overlay"},
+            {"result_topic": "/drone_perception/object_result"},
             {"rotate_180": True},
+            {"depth_history_size": 30},
+            {"max_sync_gap_sec": 0.10},
+            {"patch_size": 7},
+            {"min_depth_m": 0.15},
+            {"max_depth_m": 8.0},
+            {"map_frame": "map"},
         ],
     )
 
@@ -79,7 +75,6 @@ def generate_launch_description():
             start_realsense_arg,
             realsense_launch,
             mount_tf_node,
-            image_rotator_node,
-            grounding_node,
+            gemini_grounding_node,
         ]
     )

@@ -3,7 +3,7 @@
 <package format="3">
   <name>drone_perception</name>
   <version>0.0.0</version>
-  <description>BBox-to-3D projection node for D455 based drone workflows</description>
+  <description>Integrated Gemini grounding node for D455 based drone workflows</description>
   <maintainer email="husl-ai@todo.todo">husl-ai</maintainer>
   <license>TODO: License declaration</license>
 

@@ -19,7 +19,7 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "use_perception",
                 default_value="false",
-                description="Launch static bbox projection service node",
+                description="Launch integrated Gemini grounding perception node",
             ),
             DeclareLaunchArgument(
                 "fcu_url",
@@ -39,12 +39,19 @@ def generate_launch_description():
             ),
             Node(
                 package="drone_perception",
-                executable="bbox_projection",
+                executable="gemini_grounding",
                 output="screen",
                 condition=IfCondition(use_perception),
                 parameters=[
+                    {"color_topic_raw": "/camera/camera/color/image_raw"},
+                    {"color_rotated_topic": "/drone_perception/color/image_rotated"},
                     {"depth_topic": "/camera/camera/aligned_depth_to_color/image_raw"},
                     {"camera_info_topic": "/camera/camera/color/camera_info"},
+                    {"query_topic": "/drone_perception/object_query"},
+                    {"overlay_topic": "/drone_perception/ui_overlay"},
+                    {"result_topic": "/drone_perception/object_result"},
+                    {"rotate_180": True},
+                    {"patch_size": 7},
                     {"map_frame": "map"},
                 ],
             ),

@@ -23,9 +23,8 @@ setup(
     extras_require={"test": ["pytest"]},
     entry_points={
         "console_scripts": [
-            "bbox_projection = drone_perception.object_grounding_node:main",
             "simple_ui = drone_perception.simple_ui_node:main",
-            "image_rotator = drone_perception.image_rotator_node:main",
+            "gemini_grounding = drone_perception.gemini_grounding_node:main",
         ],
     },
 )
