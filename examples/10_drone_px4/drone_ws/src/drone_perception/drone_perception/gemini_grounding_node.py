@@ -3,6 +3,7 @@ import copy
 import json
 import os
 import re
+import socket
 import threading
 import time
 from urllib import error as url_error
@@ -45,7 +46,10 @@ class GeminiGroundingNode(Node):
         self.declare_parameter("gemini_model", "gemini-3.0-flash")
         self.declare_parameter("gemini_api_key_env", "GEMINI_API_KEY")
         self.declare_parameter("gemini_temperature", 0.1)
-        self.declare_parameter("request_timeout_sec", 15.0)
+        self.declare_parameter("request_timeout_sec", 30.0)
+        self.declare_parameter("request_max_retries", 2)
+        self.declare_parameter("request_retry_backoff_sec", 1.0)
+        self.declare_parameter("jpeg_quality", 80)
         self.declare_parameter("min_confidence", 0.5)
         self.declare_parameter("publish_retries", 12)
         self.declare_parameter("publish_retry_interval_sec", 0.2)
@@ -650,7 +654,9 @@ class GeminiGroundingNode(Node):
             return generation == self._generation
 
     def _gemini_detect_bbox_and_caption(self, api_key: str, query: str, image) -> dict:
-        ok, jpg = cv2.imencode(".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+        jpeg_quality = int(self.get_parameter("jpeg_quality").value)
+        jpeg_quality = max(40, min(jpeg_quality, 95))
+        ok, jpg = cv2.imencode(".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), jpeg_quality])
         if not ok:
             return {"ok": False, "error": "Failed to encode image"}
 
@@ -660,6 +666,8 @@ class GeminiGroundingNode(Node):
         model = str(self.get_parameter("gemini_model").value)
         timeout_sec = float(self.get_parameter("request_timeout_sec").value)
         temperature = float(self.get_parameter("gemini_temperature").value)
+        max_retries = max(1, int(self.get_parameter("request_max_retries").value))
+        retry_backoff = max(0.0, float(self.get_parameter("request_retry_backoff_sec").value))
 
         prompt = (
             "You are a robotics vision grounding module. "
@@ -725,14 +733,36 @@ class GeminiGroundingNode(Node):
             method="POST",
         )
 
-        try:
-            with url_request.urlopen(req, timeout=timeout_sec) as resp:
-                raw = resp.read().decode("utf-8")
-        except url_error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="ignore")
-            return {"ok": False, "error": f"Gemini HTTP {exc.code}: {detail}"}
-        except Exception as exc:
-            return {"ok": False, "error": f"Gemini request failed: {exc}"}
+        raw = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                with url_request.urlopen(req, timeout=timeout_sec) as resp:
+                    raw = resp.read().decode("utf-8")
+                break
+            except url_error.HTTPError as exc:
+                detail = exc.read().decode("utf-8", errors="ignore")
+                return {"ok": False, "error": f"Gemini HTTP {exc.code}: {detail}"}
+            except Exception as exc:
+                timeout_error = self._is_timeout_error(exc)
+                if timeout_error and attempt < max_retries:
+                    self.get_logger().warn(
+                        f"Gemini timeout (attempt {attempt}/{max_retries}), retrying in {retry_backoff:.1f}s"
+                    )
+                    if retry_backoff > 0.0:
+                        time.sleep(retry_backoff)
+                    continue
+                if timeout_error:
+                    return {
+                        "ok": False,
+                        "error": (
+                            f"Gemini request timed out after {attempt} attempt(s) "
+                            f"(timeout={timeout_sec:.1f}s)"
+                        ),
+                    }
+                return {"ok": False, "error": f"Gemini request failed: {exc}"}
+
+        if raw is None:
+            return {"ok": False, "error": "Gemini request failed: empty response"}
 
         parsed = self._parse_response_json(raw)
         if not isinstance(parsed, dict):
@@ -816,6 +846,18 @@ class GeminiGroundingNode(Node):
                 return json.loads(match.group(0))
             except Exception:
                 return None
+
+    @staticmethod
+    def _is_timeout_error(exc: Exception) -> bool:
+        if isinstance(exc, (TimeoutError, socket.timeout)):
+            return True
+        if isinstance(exc, url_error.URLError):
+            reason = getattr(exc, "reason", None)
+            if isinstance(reason, (TimeoutError, socket.timeout)):
+                return True
+            if reason is not None and "timed out" in str(reason).lower():
+                return True
+        return "timed out" in str(exc).lower()
 
 
 def main() -> None:
