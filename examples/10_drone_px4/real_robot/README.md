@@ -57,8 +57,8 @@ source install/setup.bash
 ros2 run drone_controller bridge
 ```
 
-### 5. (Optional) Launch Perception Node for BBox Projection
-This starts `/drone_perception/project_bbox_to_3d`.
+### 5. (Optional) Launch Perception Node for Vision Grounding
+This starts the integrated `gemini_grounding` node.
 
 ```bash
 source /opt/ros/jazzy/setup.bash
@@ -66,17 +66,19 @@ source install/setup.bash
 ros2 launch drone_perception realsense_grounding.launch.py
 ```
 
-Vision detection itself is handled by Gemini multimodal (via image tools), then the detected bbox is projected to 3D map coordinates through the ROS service.
+Vision grounding is handled end-to-end in one node:
+rotated RGB -> Gemini bbox/caption -> aligned depth projection -> map coordinates (`/drone_perception/object_result`).
 
 Recommended structured output from Gemini detection step:
+(`x/y` coordinates are in `[0,1000]` image range)
 
 ```json
 {
   "label": "red box",
-  "x_min": 510,
-  "y_min": 260,
-  "x_max": 760,
-  "y_max": 520,
+  "x_min": 325,
+  "y_min": 290,
+  "x_max": 485,
+  "y_max": 610,
   "confidence": 0.88
 }
 ```

@@ -51,8 +51,6 @@ class GeminiGroundingNode(Node):
         self.declare_parameter("request_retry_backoff_sec", 1.0)
         self.declare_parameter("jpeg_quality", 80)
         self.declare_parameter("min_confidence", 0.5)
-        self.declare_parameter("publish_retries", 12)
-        self.declare_parameter("publish_retry_interval_sec", 0.2)
         self.declare_parameter("status_heartbeat_sec", 1.0)
         self.declare_parameter("debug_trace", True)
 
@@ -100,7 +98,7 @@ class GeminiGroundingNode(Node):
             "Gemini grounding ready: color=%s depth=%s query=%s"
             % (color_topic_raw, depth_topic, query_topic)
         )
-        self._publish_json_once(self._result_pub, self._last_result)
+        self._publish_json(self._result_pub, self._last_result)
 
     def _trace(self, message: str) -> None:
         if bool(self.get_parameter("debug_trace").value):
@@ -646,26 +644,6 @@ class GeminiGroundingNode(Node):
             self.get_logger().warn(f"Failed to encode JSON payload: {exc}")
             return
 
-        retries = max(1, int(self.get_parameter("publish_retries").value))
-        interval_sec = max(0.0, float(self.get_parameter("publish_retry_interval_sec").value))
-
-        def _worker() -> None:
-            for i in range(retries):
-                msg = String()
-                msg.data = encoded
-                publisher.publish(msg)
-                if i + 1 < retries and interval_sec > 0.0:
-                    time.sleep(interval_sec)
-
-        threading.Thread(target=_worker, daemon=True).start()
-
-    def _publish_json_once(self, publisher, payload: dict) -> None:
-        try:
-            encoded = json.dumps(payload, separators=(",", ":"))
-        except Exception as exc:
-            self.get_logger().warn(f"Failed to encode JSON payload: {exc}")
-            return
-
         msg = String()
         msg.data = encoded
         publisher.publish(msg)
@@ -687,7 +665,7 @@ class GeminiGroundingNode(Node):
     def _heartbeat_cb(self) -> None:
         with self._state_lock:
             payload = dict(self._last_result)
-        self._publish_json_once(self._result_pub, payload)
+        self._publish_json(self._result_pub, payload)
 
     def _publish_error(
         self,

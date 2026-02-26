@@ -169,88 +169,25 @@ class SimpleUiNode(Node):
 
     @staticmethod
     def _parse_bbox(overlay: dict, image_shape):
-        h, w = image_shape
-
-        candidates = []
+        height, width = image_shape
         bbox = overlay.get("bbox")
-        if bbox is not None:
-            candidates.append(bbox)
-
-        det = overlay.get("detection")
-        if isinstance(det, dict) and det.get("bbox") is not None:
-            candidates.append(det["bbox"])
-
-        candidates.append(overlay)
-
-        for candidate in candidates:
-            parsed = SimpleUiNode._bbox_from_any(candidate, w, h)
-            if parsed is not None:
-                return parsed
-        return None
-
-    @staticmethod
-    def _bbox_from_any(candidate, width: int, height: int):
-        if isinstance(candidate, dict):
-            key_sets = [
-                ("x_min", "y_min", "x_max", "y_max", "xyxy"),
-                ("xmin", "ymin", "xmax", "ymax", "xyxy"),
-                ("x1", "y1", "x2", "y2", "xyxy"),
-                ("left", "top", "right", "bottom", "xyxy"),
-                ("ymin", "xmin", "ymax", "xmax", "yxyx"),
-            ]
-            for k0, k1, k2, k3, order in key_sets:
-                if all(k in candidate for k in (k0, k1, k2, k3)):
-                    return SimpleUiNode._bbox_from_values(
-                        candidate[k0],
-                        candidate[k1],
-                        candidate[k2],
-                        candidate[k3],
-                        width,
-                        height,
-                        order,
-                    )
+        if not isinstance(bbox, dict):
             return None
 
-        if isinstance(candidate, (list, tuple)) and len(candidate) == 4:
-            parsed_xyxy = SimpleUiNode._bbox_from_values(
-                candidate[0], candidate[1], candidate[2], candidate[3], width, height, "xyxy"
-            )
-            parsed_yxyx = SimpleUiNode._bbox_from_values(
-                candidate[0], candidate[1], candidate[2], candidate[3], width, height, "yxyx"
-            )
-            if parsed_xyxy is None:
-                return parsed_yxyx
-            if parsed_yxyx is None:
-                return parsed_xyxy
+        required = ("x_min", "y_min", "x_max", "y_max")
+        if not all(key in bbox for key in required):
+            return None
 
-            area_xyxy = (parsed_xyxy[2] - parsed_xyxy[0]) * (parsed_xyxy[3] - parsed_xyxy[1])
-            area_yxyx = (parsed_yxyx[2] - parsed_yxyx[0]) * (parsed_yxyx[3] - parsed_yxyx[1])
-            return parsed_xyxy if area_xyxy >= area_yxyx else parsed_yxyx
-
-        return None
-
-    @staticmethod
-    def _bbox_from_values(a, b, c, d, width: int, height: int, order: str):
         try:
-            v0, v1, v2, v3 = float(a), float(b), float(c), float(d)
+            x_min = int(bbox["x_min"])
+            y_min = int(bbox["y_min"])
+            x_max = int(bbox["x_max"])
+            y_max = int(bbox["y_max"])
         except Exception:
             return None
 
-        is_normalized = all(0.0 <= v <= 1.0 for v in (v0, v1, v2, v3))
-
-        if order == "xyxy":
-            x_min, y_min, x_max, y_max = v0, v1, v2, v3
-        else:
-            y_min, x_min, y_max, x_max = v0, v1, v2, v3
-
-        if is_normalized:
-            x_min *= max(1, width - 1)
-            x_max *= max(1, width - 1)
-            y_min *= max(1, height - 1)
-            y_max *= max(1, height - 1)
-
-        x_min, x_max = sorted((int(round(x_min)), int(round(x_max))))
-        y_min, y_max = sorted((int(round(y_min)), int(round(y_max))))
+        x_min, x_max = sorted((x_min, x_max))
+        y_min, y_max = sorted((y_min, y_max))
 
         x_min = max(0, min(x_min, width - 1))
         x_max = max(0, min(x_max, width - 1))
