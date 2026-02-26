@@ -54,6 +54,16 @@ def parse_args() -> argparse.Namespace:
         default="./bbox_probe_out",
         help="Directory for JSONL logs and overlay outputs.",
     )
+    parser.add_argument(
+        "--bbox-format",
+        choices=("auto", "pixel", "normalized", "thousand"),
+        default="auto",
+        help=(
+            "How to interpret model bbox coordinates: "
+            "auto(only 0..1 normalization), pixel(raw pixels), "
+            "normalized(0..1), thousand(0..1000 to pixels)."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -153,13 +163,13 @@ def parse_response_json(raw: str):
             return None
 
 
-def normalize_bbox(bbox_obj, width: int, height: int):
+def normalize_bbox(bbox_obj, width: int, height: int, bbox_format: str):
     if not isinstance(bbox_obj, dict):
-        return None, "bbox is missing or not object"
+        return None, "bbox is missing or not object", bbox_format
 
     keys = ("x_min", "y_min", "x_max", "y_max")
     if not all(k in bbox_obj for k in keys):
-        return None, "bbox keys missing"
+        return None, "bbox keys missing", bbox_format
 
     try:
         x_min = float(bbox_obj["x_min"])
@@ -167,14 +177,26 @@ def normalize_bbox(bbox_obj, width: int, height: int):
         x_max = float(bbox_obj["x_max"])
         y_max = float(bbox_obj["y_max"])
     except Exception:
-        return None, "bbox values are not numeric"
+        return None, "bbox values are not numeric", bbox_format
 
-    # Guard: some responses still come normalized.
-    if all(0.0 <= v <= 1.0 for v in (x_min, y_min, x_max, y_max)):
+    applied_format = bbox_format
+    if applied_format == "auto":
+        # Keep auto conservative: only map 0..1 normalized coordinates.
+        if all(0.0 <= v <= 1.0 for v in (x_min, y_min, x_max, y_max)):
+            applied_format = "normalized"
+        else:
+            applied_format = "pixel"
+
+    if applied_format == "normalized":
         x_min *= max(1, width - 1)
         x_max *= max(1, width - 1)
         y_min *= max(1, height - 1)
         y_max *= max(1, height - 1)
+    elif applied_format == "thousand":
+        x_min = (x_min / 1000.0) * max(1, width - 1)
+        x_max = (x_max / 1000.0) * max(1, width - 1)
+        y_min = (y_min / 1000.0) * max(1, height - 1)
+        y_max = (y_max / 1000.0) * max(1, height - 1)
 
     x0 = int(round(min(x_min, x_max)))
     y0 = int(round(min(y_min, y_max)))
@@ -187,9 +209,9 @@ def normalize_bbox(bbox_obj, width: int, height: int):
     y1 = max(0, min(y1, height - 1))
 
     if x0 >= x1 or y0 >= y1:
-        return None, f"degenerate bbox ({x0},{y0})-({x1},{y1})"
+        return None, f"degenerate bbox ({x0},{y0})-({x1},{y1})", applied_format
 
-    return {"x_min": x0, "y_min": y0, "x_max": x1, "y_max": y1}, None
+    return {"x_min": x0, "y_min": y0, "x_max": x1, "y_max": y1}, None, applied_format
 
 
 def call_gemini(
@@ -370,6 +392,7 @@ def main() -> int:
     print(f"Query: {args.query}")
     print(f"Model: {args.model}")
     print(f"Mode: {args.mode}")
+    print(f"BBox format: {args.bbox_format}")
     print(f"Runs: {args.runs}")
     print("-" * 60)
 
@@ -401,7 +424,9 @@ def main() -> int:
             else:
                 assert parsed is not None
                 found = bool(parsed.get("found", False))
-                bbox, bbox_err = normalize_bbox(parsed.get("bbox"), width, height)
+                bbox, bbox_err, applied_format = normalize_bbox(
+                    parsed.get("bbox"), width, height, args.bbox_format
+                )
                 confidence = parsed.get("confidence", 0.0)
                 label = str(parsed.get("label", args.query))
                 caption = str(parsed.get("caption", ""))
@@ -425,6 +450,7 @@ def main() -> int:
                         "run": i,
                         "ok": True,
                         "elapsed_sec": elapsed,
+                        "bbox_format": applied_format,
                         "label": label,
                         "confidence": float(confidence),
                         "bbox": bbox,
@@ -445,6 +471,7 @@ def main() -> int:
     summary["query"] = args.query
     summary["model"] = args.model
     summary["mode"] = args.mode
+    summary["bbox_format"] = args.bbox_format
     summary["image"] = str(image_path)
     summary["output_dir"] = str(out_dir)
     summary["invalid_examples"] = invalid_records[:3]
