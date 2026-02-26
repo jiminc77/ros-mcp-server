@@ -32,8 +32,8 @@ prompts: |
   Vision Workflow:
   - Use this fixed sequence:
     1) Publish one query string to `/drone_perception/object_query` (`std_msgs/msg/String`).
-    2) Read `/drone_perception/object_result` (`std_msgs/msg/String`) and parse JSON.
-    3) If `status='running'`, wait and read `/drone_perception/object_result` again.
+    2) Read `/drone_perception/object_result` (`std_msgs/msg/String`) with `subscribe_once(..., timeout=20.0)` and parse JSON.
+    3) If `status='idle'` or `status='running'`, wait and read `/drone_perception/object_result` again.
     4) If `status='success'`, use `object_map` to generate waypoint.
     5) If `status='error'`, report `status_code/status_message` to user.
   - Never publish directly to `/drone_perception/object_result` or `/drone_perception/ui_overlay`.
@@ -43,7 +43,7 @@ prompts: |
     rotated RGB -> Gemini bbox/caption -> same-stamp depth patch median -> map projection -> object_result.
   - Main control logic must not run raw vision/projection steps directly.
   - `/drone_perception/ui_overlay` is only for human visualization.
-  - `object_result.status` can be `running`, `success`, or `error`.
+  - `object_result.status` can be `idle`, `running`, `success`, or `error`.
   - Success fields in `object_result`: `query`, `generation`, `status`, `detection`, `caption`, `depth_m`, `object_map`.
 
   Relative Language:

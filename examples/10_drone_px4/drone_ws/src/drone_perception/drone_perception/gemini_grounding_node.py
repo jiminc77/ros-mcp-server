@@ -49,6 +49,7 @@ class GeminiGroundingNode(Node):
         self.declare_parameter("min_confidence", 0.5)
         self.declare_parameter("publish_retries", 12)
         self.declare_parameter("publish_retry_interval_sec", 0.2)
+        self.declare_parameter("status_heartbeat_sec", 1.0)
 
         color_topic_raw = str(self.get_parameter("color_topic_raw").value)
         color_rotated_topic = str(self.get_parameter("color_rotated_topic").value)
@@ -74,16 +75,27 @@ class GeminiGroundingNode(Node):
         self._depth_history_limit = max(1, int(self.get_parameter("depth_history_size").value))
         self._camera_info = None
         self._generation = 0
+        self._last_result = {
+            "query": "",
+            "generation": 0,
+            "status": "idle",
+            "status_code": "IDLE",
+            "status_message": "No active query",
+            "source": "gemini_grounding",
+        }
 
         self.create_subscription(Image, color_topic_raw, self._color_cb, qos_profile_sensor_data)
         self.create_subscription(Image, depth_topic, self._depth_cb, qos_profile_sensor_data)
         self.create_subscription(CameraInfo, camera_info_topic, self._camera_info_cb, qos_profile_sensor_data)
         self.create_subscription(String, query_topic, self._query_cb, 10)
+        heartbeat_sec = max(0.2, float(self.get_parameter("status_heartbeat_sec").value))
+        self.create_timer(heartbeat_sec, self._heartbeat_cb)
 
         self.get_logger().info(
             "Gemini grounding ready: color=%s depth=%s query=%s"
             % (color_topic_raw, depth_topic, query_topic)
         )
+        self._publish_json_once(self._result_pub, self._last_result)
 
     def _color_cb(self, msg: Image) -> None:
         try:
@@ -130,6 +142,15 @@ class GeminiGroundingNode(Node):
 
         if not query:
             self._publish_overlay({"status_code": "IDLE", "status_message": "No active query"})
+            self._publish_result(
+                {
+                    "query": "",
+                    "generation": int(generation),
+                    "status": "idle",
+                    "status_code": "IDLE",
+                    "status_message": "No active query",
+                }
+            )
             return
 
         if image is None:
@@ -563,13 +584,31 @@ class GeminiGroundingNode(Node):
 
         threading.Thread(target=_worker, daemon=True).start()
 
+    def _publish_json_once(self, publisher, payload: dict) -> None:
+        try:
+            encoded = json.dumps(payload, separators=(",", ":"))
+        except Exception as exc:
+            self.get_logger().warn(f"Failed to encode JSON payload: {exc}")
+            return
+
+        msg = String()
+        msg.data = encoded
+        publisher.publish(msg)
+
     def _publish_overlay(self, payload: dict) -> None:
         self._publish_json(self._overlay_pub, payload)
 
     def _publish_result(self, payload: dict) -> None:
         data = dict(payload)
         data["source"] = "gemini_grounding"
+        with self._state_lock:
+            self._last_result = dict(data)
         self._publish_json(self._result_pub, data)
+
+    def _heartbeat_cb(self) -> None:
+        with self._state_lock:
+            payload = dict(self._last_result)
+        self._publish_json_once(self._result_pub, payload)
 
     def _publish_error(
         self,
