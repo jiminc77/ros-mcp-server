@@ -39,7 +39,7 @@ prompts: |
        - non-terminal status: `idle` or `running`
     5) If terminal status is `success`, use `object_map` to generate waypoint.
     6) If terminal status is `error`, report `status_code/status_message` to user.
-  - Recommended waiting method: `subscribe_for_duration(..., duration=90.0)` and select the latest terminal message of the active generation.
+  - Recommended waiting method: `subscribe_for_duration(..., duration=10.0)` and select the latest terminal message of the active generation.
   - Do not publish another `/drone_perception/object_query` while the active generation is unresolved.
   - UI overlay rendering is not a completion condition.
   - Never publish directly to `/drone_perception/object_result` or `/drone_perception/ui_overlay`.
