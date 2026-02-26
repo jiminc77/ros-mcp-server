@@ -54,6 +54,7 @@ class GeminiGroundingNode(Node):
         self.declare_parameter("publish_retries", 12)
         self.declare_parameter("publish_retry_interval_sec", 0.2)
         self.declare_parameter("status_heartbeat_sec", 1.0)
+        self.declare_parameter("debug_trace", True)
 
         color_topic_raw = str(self.get_parameter("color_topic_raw").value)
         color_rotated_topic = str(self.get_parameter("color_rotated_topic").value)
@@ -101,6 +102,10 @@ class GeminiGroundingNode(Node):
         )
         self._publish_json_once(self._result_pub, self._last_result)
 
+    def _trace(self, message: str) -> None:
+        if bool(self.get_parameter("debug_trace").value):
+            self.get_logger().info(f"[trace] {message}")
+
     def _color_cb(self, msg: Image) -> None:
         try:
             image = self._bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
@@ -136,6 +141,7 @@ class GeminiGroundingNode(Node):
             self._camera_info = msg
 
     def _query_cb(self, msg: String) -> None:
+        query_start = time.monotonic()
         query = msg.data.strip()
         with self._state_lock:
             self._generation += 1
@@ -143,6 +149,14 @@ class GeminiGroundingNode(Node):
             image = None if self._latest_rotated is None else self._latest_rotated.copy()
             stamp_sec = self._latest_stamp_sec
             stamp_nanosec = self._latest_stamp_nanosec
+            depth_count = len(self._depth_history)
+            camera_ready = self._camera_info is not None
+
+        self._trace(
+            "query received"
+            f" generation={generation} query={query!r}"
+            f" image_ready={image is not None} depth_frames={depth_count} camera_info={camera_ready}"
+        )
 
         if not query:
             self._publish_overlay({"status_code": "IDLE", "status_message": "No active query"})
@@ -163,6 +177,10 @@ class GeminiGroundingNode(Node):
 
         snap = self._snapshot_projection_inputs(stamp_sec, stamp_nanosec)
         if not snap["ok"]:
+            self._trace(
+                "snapshot failed"
+                f" generation={generation} code={snap.get('code')} message={snap.get('message')}"
+            )
             self._publish_error(
                 query,
                 generation,
@@ -172,6 +190,12 @@ class GeminiGroundingNode(Node):
                 image_stamp_nanosec=stamp_nanosec,
             )
             return
+
+        self._trace(
+            "snapshot ready"
+            f" generation={generation} elapsed={time.monotonic() - query_start:.3f}s"
+            f" image_stamp={stamp_sec}.{stamp_nanosec:09d}"
+        )
 
         self._publish_overlay({"label": query, "status_code": "RUNNING", "status_message": "Processing"})
         self._publish_result(
@@ -214,6 +238,11 @@ class GeminiGroundingNode(Node):
         depth_encoding: str,
         camera_info: CameraInfo,
     ) -> None:
+        started = time.monotonic()
+        self._trace(
+            "process start"
+            f" generation={generation} query={query!r} stamp={image_stamp_sec}.{image_stamp_nanosec:09d}"
+        )
         try:
             api_key_env = str(self.get_parameter("gemini_api_key_env").value)
             api_key = os.environ.get(api_key_env, "").strip()
@@ -229,8 +258,15 @@ class GeminiGroundingNode(Node):
                     )
                 return
 
+            t0 = time.monotonic()
             detection = self._gemini_detect_bbox_and_caption(api_key, query, rotated_image)
+            self._trace(
+                "detection done"
+                f" generation={generation} ok={detection.get('ok', False)}"
+                f" elapsed={time.monotonic() - t0:.3f}s"
+            )
             if not self._is_current(generation):
+                self._trace(f"generation stale after detection: generation={generation}")
                 return
 
             if not detection.get("ok", False):
@@ -241,6 +277,11 @@ class GeminiGroundingNode(Node):
                     str(detection.get("error", "Detection failed")),
                     image_stamp_sec=image_stamp_sec,
                     image_stamp_nanosec=image_stamp_nanosec,
+                )
+                self._trace(
+                    "detection failed"
+                    f" generation={generation} error={detection.get('error', 'Detection failed')}"
+                    f" total_elapsed={time.monotonic() - started:.3f}s"
                 )
                 return
 
@@ -256,15 +297,27 @@ class GeminiGroundingNode(Node):
                     image_stamp_sec=image_stamp_sec,
                     image_stamp_nanosec=image_stamp_nanosec,
                 )
+                self._trace(
+                    "low confidence"
+                    f" generation={generation} confidence={confidence:.3f} min={min_confidence:.3f}"
+                    f" total_elapsed={time.monotonic() - started:.3f}s"
+                )
                 return
 
+            t1 = time.monotonic()
             projected = self._project_rotated_bbox_to_map(
                 detection["bbox"],
                 depth_frame,
                 depth_encoding,
                 camera_info,
             )
+            self._trace(
+                "projection done"
+                f" generation={generation} ok={projected.get('ok', False)}"
+                f" elapsed={time.monotonic() - t1:.3f}s"
+            )
             if not self._is_current(generation):
+                self._trace(f"generation stale after projection: generation={generation}")
                 return
 
             if not projected.get("ok", False):
@@ -276,6 +329,11 @@ class GeminiGroundingNode(Node):
                     bbox=detection.get("bbox"),
                     image_stamp_sec=image_stamp_sec,
                     image_stamp_nanosec=image_stamp_nanosec,
+                )
+                self._trace(
+                    "projection failed"
+                    f" generation={generation} code={projected.get('code')} msg={projected.get('message')}"
+                    f" total_elapsed={time.monotonic() - started:.3f}s"
                 )
                 return
 
@@ -315,6 +373,11 @@ class GeminiGroundingNode(Node):
                     "representative_pixel": projected["representative_pixel"],
                 }
             )
+            self._trace(
+                "process success"
+                f" generation={generation} map=({object_map['x']:.3f},{object_map['y']:.3f},{object_map['z']:.3f})"
+                f" total_elapsed={time.monotonic() - started:.3f}s"
+            )
         except Exception as exc:
             if self._is_current(generation):
                 self._publish_error(
@@ -325,6 +388,11 @@ class GeminiGroundingNode(Node):
                     image_stamp_sec=image_stamp_sec,
                     image_stamp_nanosec=image_stamp_nanosec,
                 )
+            self._trace(
+                "process internal error"
+                f" generation={generation} type={type(exc).__name__} error={exc}"
+                f" total_elapsed={time.monotonic() - started:.3f}s"
+            )
 
     def _project_rotated_bbox_to_map(
         self,
@@ -447,6 +515,9 @@ class GeminiGroundingNode(Node):
         gap_sec = abs(stamp_ns - target_ns) / 1_000_000_000.0 if target_ns > 0 else 0.0
         max_sync_gap = float(self.get_parameter("max_sync_gap_sec").value)
         if target_ns > 0 and gap_sec > max_sync_gap:
+            self._trace(
+                f"snapshot sync gap too large gap={gap_sec:.3f}s max={max_sync_gap:.3f}s"
+            )
             return {
                 "ok": False,
                 "code": "E_TIME_SYNC",
@@ -607,6 +678,10 @@ class GeminiGroundingNode(Node):
         data["source"] = "gemini_grounding"
         with self._state_lock:
             self._last_result = dict(data)
+        status = str(data.get("status", "unknown"))
+        code = str(data.get("status_code", ""))
+        generation = int(data.get("generation", 0))
+        self._trace(f"publish result generation={generation} status={status} code={code}")
         self._publish_json(self._result_pub, data)
 
     def _heartbeat_cb(self) -> None:
@@ -668,6 +743,11 @@ class GeminiGroundingNode(Node):
         temperature = float(self.get_parameter("gemini_temperature").value)
         max_retries = max(1, int(self.get_parameter("request_max_retries").value))
         retry_backoff = max(0.0, float(self.get_parameter("request_retry_backoff_sec").value))
+        self._trace(
+            "gemini request start"
+            f" model={model} timeout={timeout_sec:.1f}s retries={max_retries}"
+            f" query={query!r} image={w}x{h} jpeg_bytes={len(jpg)}"
+        )
 
         prompt = (
             "You are a robotics vision grounding module. "
@@ -735,15 +815,34 @@ class GeminiGroundingNode(Node):
 
         raw = None
         for attempt in range(1, max_retries + 1):
+            attempt_started = time.monotonic()
             try:
                 with url_request.urlopen(req, timeout=timeout_sec) as resp:
                     raw = resp.read().decode("utf-8")
+                self._trace(
+                    "gemini request success"
+                    f" attempt={attempt}/{max_retries}"
+                    f" elapsed={time.monotonic() - attempt_started:.3f}s"
+                    f" response_chars={len(raw)}"
+                )
                 break
             except url_error.HTTPError as exc:
                 detail = exc.read().decode("utf-8", errors="ignore")
+                self._trace(
+                    "gemini http error"
+                    f" attempt={attempt}/{max_retries} code={exc.code}"
+                    f" elapsed={time.monotonic() - attempt_started:.3f}s"
+                )
                 return {"ok": False, "error": f"Gemini HTTP {exc.code}: {detail}"}
             except Exception as exc:
                 timeout_error = self._is_timeout_error(exc)
+                self._trace(
+                    "gemini request exception"
+                    f" attempt={attempt}/{max_retries}"
+                    f" timeout={timeout_error}"
+                    f" type={type(exc).__name__} error={exc}"
+                    f" elapsed={time.monotonic() - attempt_started:.3f}s"
+                )
                 if timeout_error and attempt < max_retries:
                     self.get_logger().warn(
                         f"Gemini timeout (attempt {attempt}/{max_retries}), retrying in {retry_backoff:.1f}s"
@@ -766,8 +865,10 @@ class GeminiGroundingNode(Node):
 
         parsed = self._parse_response_json(raw)
         if not isinstance(parsed, dict):
+            self._trace("gemini parse failed: output is not JSON object")
             return {"ok": False, "error": "Gemini output is not a JSON object"}
         if not bool(parsed.get("found", False)):
+            self._trace("gemini parse result: target not found")
             return {"ok": False, "error": "Target object not found"}
 
         bbox_obj = parsed.get("bbox")
@@ -792,6 +893,9 @@ class GeminiGroundingNode(Node):
         y_min = max(0, min(y_min, h - 1))
         y_max = max(0, min(y_max, h - 1))
         if x_min >= x_max or y_min >= y_max:
+            self._trace(
+                f"gemini parse failed: degenerate bbox ({x_min},{y_min})-({x_max},{y_max})"
+            )
             return {"ok": False, "error": "Degenerate bbox"}
 
         try:
