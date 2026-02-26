@@ -50,9 +50,11 @@ def generate_launch_description():
             {"jpeg_quality": 80},
             {"depth_history_size": 30},
             {"max_sync_gap_sec": 0.10},
-            {"patch_size": 7},
             {"min_depth_m": 0.15},
             {"max_depth_m": 8.0},
+            {"depth_roi_inset_ratio": 0.10},
+            {"depth_near_percentile": 15.0},
+            {"depth_near_margin_m": 0.10},
             {"map_frame": "map"},
         ],
     )

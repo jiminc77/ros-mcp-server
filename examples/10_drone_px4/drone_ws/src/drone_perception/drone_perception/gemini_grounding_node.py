@@ -37,9 +37,11 @@ class GeminiGroundingNode(Node):
         self.declare_parameter("rotate_180", True)
         self.declare_parameter("depth_history_size", 30)
         self.declare_parameter("max_sync_gap_sec", 0.10)
-        self.declare_parameter("patch_size", 7)
         self.declare_parameter("min_depth_m", 0.4)
         self.declare_parameter("max_depth_m", 8.0)
+        self.declare_parameter("depth_roi_inset_ratio", 0.10)
+        self.declare_parameter("depth_near_percentile", 15.0)
+        self.declare_parameter("depth_near_margin_m", 0.10)
         self.declare_parameter("map_frame", "map")
         self.declare_parameter("camera_frame", "")
 
@@ -418,26 +420,29 @@ class GeminiGroundingNode(Node):
         center_x = (x0_raw + x1_raw) // 2
         center_y = (y0_raw + y1_raw) // 2
 
-        patch_size = max(3, int(self.get_parameter("patch_size").value))
-        if patch_size % 2 == 0:
-            patch_size += 1
-
-        depth_m, valid_ratio = self._depth_from_center_patch(
+        depth_m, valid_ratio, rep_x_raw, rep_y_raw = self._depth_from_bbox_nearest_band(
             depth_frame,
             depth_encoding,
-            center_x,
-            center_y,
-            patch_size,
+            x0_raw,
+            y0_raw,
+            x1_raw,
+            y1_raw,
             float(self.get_parameter("min_depth_m").value),
             float(self.get_parameter("max_depth_m").value),
+            float(self.get_parameter("depth_roi_inset_ratio").value),
+            float(self.get_parameter("depth_near_percentile").value),
+            float(self.get_parameter("depth_near_margin_m").value),
         )
         if depth_m is None:
             return {
                 "ok": False,
                 "code": "E_DEPTH_INVALID",
-                "message": "No valid depth in center patch",
+                "message": "No valid depth in bbox ROI",
                 "confidence": float(valid_ratio),
             }
+
+        if rep_x_raw is None or rep_y_raw is None:
+            rep_x_raw, rep_y_raw = center_x, center_y
 
         fx = float(camera_info.k[0])
         fy = float(camera_info.k[4])
@@ -450,8 +455,8 @@ class GeminiGroundingNode(Node):
                 "message": "Camera intrinsics are invalid",
             }
 
-        x_cam = (float(center_x) - cx) * depth_m / fx
-        y_cam = (float(center_y) - cy) * depth_m / fy
+        x_cam = (float(rep_x_raw) - cx) * depth_m / fx
+        y_cam = (float(rep_y_raw) - cy) * depth_m / fy
         z_cam = depth_m
 
         source_frame = camera_info.header.frame_id.strip()
@@ -475,9 +480,9 @@ class GeminiGroundingNode(Node):
             }
 
         if bool(self.get_parameter("rotate_180").value):
-            rep_x, rep_y = self._pixel_raw_to_rotated(center_x, center_y, w, h)
+            rep_x, rep_y = self._pixel_raw_to_rotated(rep_x_raw, rep_y_raw, w, h)
         else:
-            rep_x, rep_y = center_x, center_y
+            rep_x, rep_y = rep_x_raw, rep_y_raw
 
         map_frame = str(self.get_parameter("map_frame").value)
 
@@ -529,39 +534,77 @@ class GeminiGroundingNode(Node):
             "camera_info": camera_info,
         }
 
-    def _depth_from_center_patch(
+    def _depth_from_bbox_nearest_band(
         self,
         depth_img,
         encoding: str,
-        center_x: int,
-        center_y: int,
-        patch_size: int,
+        x_min: int,
+        y_min: int,
+        x_max: int,
+        y_max: int,
         min_depth_m: float,
         max_depth_m: float,
-    ) -> tuple[float | None, float]:
+        inset_ratio: float,
+        near_percentile: float,
+        near_margin_m: float,
+    ) -> tuple[float | None, float, int | None, int | None]:
         h, w = depth_img.shape[:2]
-        half = patch_size // 2
-        x0 = max(0, center_x - half)
-        x1 = min(w, center_x + half + 1)
-        y0 = max(0, center_y - half)
-        y1 = min(h, center_y + half + 1)
+        x0 = max(0, min(x_min, x_max))
+        y0 = max(0, min(y_min, y_max))
+        x1 = min(w - 1, max(x_min, x_max))
+        y1 = min(h - 1, max(y_min, y_max))
 
-        if x0 >= x1 or y0 >= y1:
-            return None, 0.0
+        if x0 > x1 or y0 > y1:
+            return None, 0.0, None, None
 
-        patch = depth_img[y0:y1, x0:x1].astype(np.float32)
+        # Use an inset ROI to avoid boundary/background contamination around bbox edges.
+        roi_w = (x1 - x0 + 1)
+        roi_h = (y1 - y0 + 1)
+        inset_ratio = max(0.0, min(0.4, float(inset_ratio)))
+        inset_x = int(round(roi_w * inset_ratio))
+        inset_y = int(round(roi_h * inset_ratio))
+        xi0 = x0 + inset_x
+        yi0 = y0 + inset_y
+        xi1 = x1 - inset_x
+        yi1 = y1 - inset_y
+        if xi0 > xi1 or yi0 > yi1:
+            xi0, yi0, xi1, yi1 = x0, y0, x1, y1
+
+        roi = depth_img[yi0 : yi1 + 1, xi0 : xi1 + 1].astype(np.float32)
+        depth_meters = self._depth_to_meters(roi, encoding)
+        finite = np.isfinite(depth_meters)
+        valid_mask = finite & (depth_meters > 0.0) & (depth_meters >= min_depth_m) & (depth_meters <= max_depth_m)
+
+        total = depth_meters.size
+        valid_count = int(np.count_nonzero(valid_mask))
+        valid_ratio = float(valid_count) / float(total) if total > 0 else 0.0
+        if valid_count == 0:
+            return None, valid_ratio, None, None
+
+        valid_depths = depth_meters[valid_mask]
+        near_percentile = max(0.0, min(100.0, float(near_percentile)))
+        near_cut = float(np.percentile(valid_depths, near_percentile)) + max(0.0, float(near_margin_m))
+        near_mask = valid_mask & (depth_meters <= near_cut)
+        if not np.any(near_mask):
+            near_mask = valid_mask
+
+        selected_depths = depth_meters[near_mask]
+        depth_m = float(np.median(selected_depths))
+
+        # Pick a stable representative pixel near the selected depth band median.
+        diff = np.abs(depth_meters - depth_m)
+        diff[~near_mask] = np.inf
+        flat_idx = int(np.argmin(diff))
+        py, px = np.unravel_index(flat_idx, diff.shape)
+        rep_x = int(xi0 + px)
+        rep_y = int(yi0 + py)
+        return depth_m, valid_ratio, rep_x, rep_y
+
+    @staticmethod
+    def _depth_to_meters(depth_patch: np.ndarray, encoding: str) -> np.ndarray:
         if encoding.upper() in {"16UC1", "MONO16"}:
-            patch *= 0.001
-
-        valid = patch[np.isfinite(patch)]
-        valid = valid[(valid > 0.0) & (valid >= min_depth_m) & (valid <= max_depth_m)]
-
-        total = patch.size
-        valid_ratio = float(valid.size) / float(total) if total > 0 else 0.0
-        if valid.size == 0:
-            return None, valid_ratio
-
-        return float(np.median(valid)), valid_ratio
+            return depth_patch * 0.001
+        return depth_patch
 
     def _transform_to_map(
         self,
