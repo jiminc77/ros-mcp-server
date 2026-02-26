@@ -1,4 +1,5 @@
 import base64
+import copy
 import json
 import os
 import re
@@ -132,11 +133,32 @@ class GeminiGroundingNode(Node):
             self._publish_error(query, generation, "E_NO_IMAGE", "No image available yet")
             return
 
+        snap = self._snapshot_projection_inputs(stamp_sec, stamp_nanosec)
+        if not snap["ok"]:
+            self._publish_error(
+                query,
+                generation,
+                str(snap["code"]),
+                str(snap["message"]),
+                image_stamp_sec=stamp_sec,
+                image_stamp_nanosec=stamp_nanosec,
+            )
+            return
+
         self._publish_overlay({"label": query, "status_code": "RUNNING", "status_message": "Processing"})
 
         threading.Thread(
             target=self._process_query,
-            args=(query, generation, image, stamp_sec, stamp_nanosec),
+            args=(
+                query,
+                generation,
+                image,
+                stamp_sec,
+                stamp_nanosec,
+                snap["depth_frame"],
+                snap["depth_encoding"],
+                snap["camera_info"],
+            ),
             daemon=True,
         ).start()
 
@@ -147,6 +169,9 @@ class GeminiGroundingNode(Node):
         rotated_image,
         image_stamp_sec: int,
         image_stamp_nanosec: int,
+        depth_frame,
+        depth_encoding: str,
+        camera_info: CameraInfo,
     ) -> None:
         try:
             api_key_env = str(self.get_parameter("gemini_api_key_env").value)
@@ -194,8 +219,9 @@ class GeminiGroundingNode(Node):
 
             projected = self._project_rotated_bbox_to_map(
                 detection["bbox"],
-                image_stamp_sec,
-                image_stamp_nanosec,
+                depth_frame,
+                depth_encoding,
+                camera_info,
             )
             if not self._is_current(generation):
                 return
@@ -262,37 +288,10 @@ class GeminiGroundingNode(Node):
     def _project_rotated_bbox_to_map(
         self,
         bbox: dict,
-        image_stamp_sec: int,
-        image_stamp_nanosec: int,
+        depth_frame,
+        depth_encoding: str,
+        camera_info: CameraInfo,
     ) -> dict:
-        with self._state_lock:
-            depth_history = [(d.copy(), enc, ts) for d, enc, ts in self._depth_history]
-            camera_info = self._camera_info
-
-        if not depth_history or camera_info is None:
-            return {
-                "ok": False,
-                "code": "E_DATA_NOT_READY",
-                "message": "Depth/CameraInfo data is not ready yet",
-            }
-
-        target_ns = int(image_stamp_sec) * 1_000_000_000 + int(image_stamp_nanosec)
-        depth_frame, depth_encoding, gap_sec = self._select_depth_frame(depth_history, target_ns)
-        if depth_frame is None:
-            return {
-                "ok": False,
-                "code": "E_DATA_NOT_READY",
-                "message": "No depth frame available",
-            }
-
-        max_sync_gap = float(self.get_parameter("max_sync_gap_sec").value)
-        if target_ns > 0 and gap_sec > max_sync_gap:
-            return {
-                "ok": False,
-                "code": "E_TIME_SYNC",
-                "message": f"No depth frame near image stamp (gap={gap_sec:.3f}s, max={max_sync_gap:.3f}s)",
-            }
-
         h, w = depth_frame.shape[:2]
         x0_rot, y0_rot, x1_rot, y1_rot = self._clamp_bbox(
             int(bbox["x_min"]),
@@ -388,17 +387,37 @@ class GeminiGroundingNode(Node):
             },
         }
 
-    def _select_depth_frame(self, history: list, target_ns: int):
-        if not history:
-            return None, "", 0.0
+    def _snapshot_projection_inputs(self, image_stamp_sec: int, image_stamp_nanosec: int) -> dict:
+        target_ns = int(image_stamp_sec) * 1_000_000_000 + int(image_stamp_nanosec)
+        with self._state_lock:
+            if not self._depth_history or self._camera_info is None:
+                return {
+                    "ok": False,
+                    "code": "E_DATA_NOT_READY",
+                    "message": "Depth/CameraInfo data is not ready yet",
+                }
 
-        if target_ns <= 0:
-            depth, encoding, _ = history[-1]
-            return depth, encoding, 0.0
+            depth, encoding, stamp_ns = min(
+                self._depth_history,
+                key=lambda item: abs(item[2] - target_ns),
+            )
+            camera_info = copy.deepcopy(self._camera_info)
 
-        depth, encoding, stamp_ns = min(history, key=lambda item: abs(item[2] - target_ns))
-        gap_sec = abs(stamp_ns - target_ns) / 1_000_000_000.0
-        return depth, encoding, gap_sec
+        gap_sec = abs(stamp_ns - target_ns) / 1_000_000_000.0 if target_ns > 0 else 0.0
+        max_sync_gap = float(self.get_parameter("max_sync_gap_sec").value)
+        if target_ns > 0 and gap_sec > max_sync_gap:
+            return {
+                "ok": False,
+                "code": "E_TIME_SYNC",
+                "message": f"No depth frame near image stamp (gap={gap_sec:.3f}s, max={max_sync_gap:.3f}s)",
+            }
+
+        return {
+            "ok": True,
+            "depth_frame": depth.copy(),
+            "depth_encoding": str(encoding),
+            "camera_info": camera_info,
+        }
 
     def _depth_from_center_patch(
         self,
@@ -581,6 +600,8 @@ class GeminiGroundingNode(Node):
             "Detect one object for the query and return strict JSON. "
             f"Query: {query}. "
             f"Image width={w}, height={h}. "
+            "Coordinates must be integer pixel coordinates in this exact image (top-left origin, x to right, y to bottom). "
+            "Do not return normalized coordinates. "
             "If not found, set found=false and bbox to zeros."
         )
 
