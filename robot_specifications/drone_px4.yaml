@@ -42,10 +42,14 @@ prompts: |
        - Stop immediately when terminal status is received.
     5) If terminal status is `success`, use `object_map` to generate waypoint.
     6) If terminal status is `error`, report `status_code/status_message` to user.
+  - If `subscribe_once` times out while waiting, keep polling with the same active generation until deadline.
+  - Never publish a new object query during the same wait loop.
+  - Ignore messages from older/newer generations while waiting for the active generation.
   - Never call any movement action/service (`/drone_control/trajectory`, `/drone_control/takeoff`, `/mavros/set_mode`, etc.) from a failed or unresolved vision result.
   - If vision result is `error`, stop that plan and request a fresh object query before planning movement.
   - Use a total deadline (for example 60s), but keep each subscribe wait short.
   - Do not use `subscribe_for_duration` for this workflow.
+  - During the vision wait loop, do not call diagnostics/introspection tools (`get_topics`, `get_nodes`, `get_node_details`, `get_action_details`, `get_message_details`).
   - Do not publish another `/drone_perception/object_query` while the active generation is unresolved.
   - UI overlay rendering is not a completion condition.
   - Never publish directly to `/drone_perception/object_result` or `/drone_perception/ui_overlay`.
