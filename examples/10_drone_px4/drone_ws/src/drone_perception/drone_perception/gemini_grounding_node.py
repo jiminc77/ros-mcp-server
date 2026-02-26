@@ -750,12 +750,12 @@ class GeminiGroundingNode(Node):
         )
 
         prompt = (
-            "You are a robotics vision grounding module. "
+            "You are a vision grounding module. "
             "Detect one object for the query and return strict JSON. "
             f"Query: {query}. "
             f"Image width={w}, height={h}. "
-            "Coordinates must be integer pixel coordinates in this exact image (top-left origin, x to right, y to bottom). "
-            "Do not return normalized coordinates. "
+            "Coordinates must be integer coordinates in range [0,1000] for this image "
+            "(top-left origin, x to right, y to bottom; 0 means min edge, 1000 means max edge). "
             "If not found, set found=false and bbox to zeros."
         )
 
@@ -876,12 +876,18 @@ class GeminiGroundingNode(Node):
             return {"ok": False, "error": "bbox is missing"}
 
         try:
-            x_min = int(bbox_obj["x_min"])
-            y_min = int(bbox_obj["y_min"])
-            x_max = int(bbox_obj["x_max"])
-            y_max = int(bbox_obj["y_max"])
+            x_min_raw = float(bbox_obj["x_min"])
+            y_min_raw = float(bbox_obj["y_min"])
+            x_max_raw = float(bbox_obj["x_max"])
+            y_max_raw = float(bbox_obj["y_max"])
         except Exception:
             return {"ok": False, "error": "Invalid bbox fields"}
+
+        # Gemini bbox is interpreted as 0..1000 coordinates and mapped to image pixels.
+        x_min = int(round((x_min_raw / 1000.0) * max(1, w - 1)))
+        y_min = int(round((y_min_raw / 1000.0) * max(1, h - 1)))
+        x_max = int(round((x_max_raw / 1000.0) * max(1, w - 1)))
+        y_max = int(round((y_max_raw / 1000.0) * max(1, h - 1)))
 
         if x_min > x_max:
             x_min, x_max = x_max, x_min
