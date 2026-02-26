@@ -28,6 +28,8 @@ prompts: |
        - Use `fly_through=true` for continuous motion.
        - Use `fly_through=false` when point-by-point stop is required.
        - Use action timeout >= 180s for multi-waypoint missions.
+       - During mission execution, do not run trajectory introspection (`get_action_details`, `get_message_details`, `ros2 interface show`) for this action.
+       - Use the fixed action/type/goal schema above directly.
 
   Vision Workflow:
   - Use this fixed sequence:
@@ -37,6 +39,7 @@ prompts: |
     4) Repeat `subscribe_once(..., timeout=5.0)` until a terminal status for that same generation is received:
        - terminal status: `success` or `error`
        - non-terminal status: `idle` or `running`
+       - Stop immediately when terminal status is received.
     5) If terminal status is `success`, use `object_map` to generate waypoint.
     6) If terminal status is `error`, report `status_code/status_message` to user.
   - Use a total deadline (for example 60s), but keep each subscribe wait short.
@@ -63,4 +66,5 @@ prompts: |
   Safety:
   - Prefer high-level actions/services over raw topic publishing.
   - Set explicit action timeouts for long trajectory missions.
-  - Check `/mavros/battery` before long flights.
+  - Check `/mavros/battery` before long flights using `subscribe_once(..., timeout=5.0)`.
+  - If battery topic read times out, continue mission and report battery state as unavailable (soft-fail).
