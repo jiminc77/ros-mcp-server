@@ -52,7 +52,7 @@ class GeminiGroundingNode(Node):
 
         color_topic_raw = str(self.get_parameter("color_topic_raw").value)
         color_rotated_topic = str(self.get_parameter("color_rotated_topic").value)
-        depth_topic = str(self.get_parameter("depth_topic"ㄴ).value)
+        depth_topic = str(self.get_parameter("depth_topic").value)
         camera_info_topic = str(self.get_parameter("camera_info_topic").value)
         query_topic = str(self.get_parameter("query_topic").value)
         overlay_topic = str(self.get_parameter("overlay_topic").value)
