@@ -34,7 +34,7 @@ prompts: |
   Vision Workflow:
   - Use this fixed sequence:
     1) Publish one query string to `/drone_perception/object_query` (`std_msgs/msg/String`) exactly once.
-    2) Read `/drone_perception/object_result` with `subscribe_once(..., timeout=5.0)` and parse JSON.
+    2) Read `/drone_perception/object_result` with `subscribe_once(..., timeout=5.0)`, using msg type `std_msgs/msg/String`, and parse JSON.
     3) Store that message's `generation` as the active generation.
     4) Repeat `subscribe_once(..., timeout=5.0)` until a terminal status for that same generation is received:
        - terminal status: `success` or `error`
@@ -42,6 +42,8 @@ prompts: |
        - Stop immediately when terminal status is received.
     5) If terminal status is `success`, use `object_map` to generate waypoint.
     6) If terminal status is `error`, report `status_code/status_message` to user.
+  - Never call any movement action/service (`/drone_control/trajectory`, `/drone_control/takeoff`, `/mavros/set_mode`, etc.) from a failed or unresolved vision result.
+  - If vision result is `error`, stop that plan and request a fresh object query before planning movement.
   - Use a total deadline (for example 60s), but keep each subscribe wait short.
   - Do not use `subscribe_for_duration` for this workflow.
   - Do not publish another `/drone_perception/object_query` while the active generation is unresolved.
