@@ -31,11 +31,17 @@ prompts: |
 
   Vision Workflow:
   - Use this fixed sequence:
-    1) Publish one query string to `/drone_perception/object_query` (`std_msgs/msg/String`).
-    2) Read `/drone_perception/object_result` (`std_msgs/msg/String`) with `subscribe_once(..., timeout=20.0)` and parse JSON.
-    3) If `status='idle'` or `status='running'`, wait and read `/drone_perception/object_result` again.
-    4) If `status='success'`, use `object_map` to generate waypoint.
-    5) If `status='error'`, report `status_code/status_message` to user.
+    1) Publish one query string to `/drone_perception/object_query` (`std_msgs/msg/String`) exactly once.
+    2) Read `/drone_perception/object_result` (`std_msgs/msg/String`) and parse JSON.
+    3) Store that message's `generation` as the active generation.
+    4) Keep reading `/drone_perception/object_result` until a terminal status for that same generation is received:
+       - terminal status: `success` or `error`
+       - non-terminal status: `idle` or `running`
+    5) If terminal status is `success`, use `object_map` to generate waypoint.
+    6) If terminal status is `error`, report `status_code/status_message` to user.
+  - Recommended waiting method: `subscribe_for_duration(..., duration=90.0)` and select the latest terminal message of the active generation.
+  - Do not publish another `/drone_perception/object_query` while the active generation is unresolved.
+  - UI overlay rendering is not a completion condition.
   - Never publish directly to `/drone_perception/object_result` or `/drone_perception/ui_overlay`.
   - Never run manual image vision chains (`subscribe_once` camera + `analyze_previously_received_image`) for grounding decisions.
   - For any object-detection request, always use `/drone_perception/object_query`.
