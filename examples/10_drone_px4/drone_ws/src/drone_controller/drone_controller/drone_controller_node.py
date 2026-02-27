@@ -276,6 +276,8 @@ class DroneMCPBridge(Node):
             )
 
             feedback = DroneTakeoff.Feedback()
+            feedback_period_sec = 0.1
+            last_feedback_ts = 0.0
             start_time = time.monotonic()
             while rclpy.ok():
                 if goal_handle.is_cancel_requested:
@@ -294,8 +296,11 @@ class DroneMCPBridge(Node):
 
                 current_z = float(self.current_pose.pose.position.z)
                 error = abs(target_altitude - current_z)
-                feedback.current_altitude = current_z
-                goal_handle.publish_feedback(feedback)
+                now = time.monotonic()
+                if now - last_feedback_ts >= feedback_period_sec:
+                    feedback.current_altitude = current_z
+                    goal_handle.publish_feedback(feedback)
+                    last_feedback_ts = now
 
                 if error <= self.config.default_takeoff_tolerance_m:
                     goal_handle.succeed()

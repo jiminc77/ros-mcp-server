@@ -47,6 +47,8 @@ async def execute_trajectory_goal(
     ]
     virtual_speed = 0.0
     feedback = DroneTrajectory.Feedback()
+    feedback_period_sec = 0.1
+    last_feedback_ts = 0.0
 
     for idx, target in enumerate(points):
         waypoint_start = time.monotonic()
@@ -96,9 +98,12 @@ async def execute_trajectory_goal(
             )
             drone_dist_to_target = math.dist(current, target)
 
-            feedback.current_point_index = idx
-            feedback.distance_remaining = float(drone_dist_to_target)
-            goal_handle.publish_feedback(feedback)
+            now = time.monotonic()
+            if now - last_feedback_ts >= feedback_period_sec:
+                feedback.current_point_index = idx
+                feedback.distance_remaining = float(drone_dist_to_target)
+                goal_handle.publish_feedback(feedback)
+                last_feedback_ts = now
 
             if drone_dist_to_target <= tolerance:
                 break
