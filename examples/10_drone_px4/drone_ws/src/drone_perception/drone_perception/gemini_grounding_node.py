@@ -1,28 +1,28 @@
-import base64
-import copy
+import asyncio
 import json
 import os
-import re
-import socket
 import threading
 import time
-from urllib import error as url_error
-from urllib import request as url_request
 
 import cv2
-import numpy as np
 import rclpy
 from cv_bridge import CvBridge
-from rclpy.duration import Duration
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
-from rclpy.time import Time
 from sensor_msgs.msg import CameraInfo, Image
 from std_msgs.msg import String
-from tf2_ros import Buffer, TransformException, TransformListener
+from tf2_ros import Buffer, TransformListener
+
+from drone_perception.config import load_perception_config
+from drone_perception.gemini_client import GeminiClient
+from drone_perception.projection import ProjectionEngine
+from drone_perception.runtime import CancelToken, log_phase, status_detail
+from drone_perception.state_machine import build_status_payload, initial_idle_payload
 
 
 class GeminiGroundingNode(Node):
+    SOURCE = "gemini_grounding"
+
     def __init__(self):
         super().__init__("gemini_grounding")
 
@@ -34,28 +34,6 @@ class GeminiGroundingNode(Node):
         self.declare_parameter("overlay_topic", "/drone_perception/ui_overlay")
         self.declare_parameter("result_topic", "/drone_perception/object_result")
 
-        self.declare_parameter("rotate_180", True)
-        self.declare_parameter("depth_history_size", 30)
-        self.declare_parameter("max_sync_gap_sec", 0.10)
-        self.declare_parameter("min_depth_m", 0.4)
-        self.declare_parameter("max_depth_m", 8.0)
-        self.declare_parameter("depth_roi_inset_ratio", 0.10)
-        self.declare_parameter("depth_near_percentile", 15.0)
-        self.declare_parameter("depth_near_margin_m", 0.10)
-        self.declare_parameter("map_frame", "map")
-        self.declare_parameter("camera_frame", "")
-
-        self.declare_parameter("gemini_model", "gemini-3-flash-preview")
-        self.declare_parameter("gemini_api_key_env", "GEMINI_API_KEY")
-        self.declare_parameter("gemini_temperature", 0.0)
-        self.declare_parameter("request_timeout_sec", 30.0)
-        self.declare_parameter("request_max_retries", 2)
-        self.declare_parameter("request_retry_backoff_sec", 1.0)
-        self.declare_parameter("jpeg_quality", 80)
-        self.declare_parameter("min_confidence", 0.7)
-        self.declare_parameter("status_heartbeat_sec", 1.0)
-        self.declare_parameter("debug_trace", True)
-
         color_topic_raw = str(self.get_parameter("color_topic_raw").value)
         color_rotated_topic = str(self.get_parameter("color_rotated_topic").value)
         depth_topic = str(self.get_parameter("depth_topic").value)
@@ -64,9 +42,12 @@ class GeminiGroundingNode(Node):
         overlay_topic = str(self.get_parameter("overlay_topic").value)
         result_topic = str(self.get_parameter("result_topic").value)
 
+        self.config = load_perception_config(self)
         self._bridge = CvBridge()
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self)
+        self._gemini = GeminiClient(self.config, self._trace)
+        self._projection = ProjectionEngine(self.config, self._tf_buffer, self._trace)
 
         self._overlay_pub = self.create_publisher(String, overlay_topic, 10)
         self._result_pub = self.create_publisher(String, result_topic, 10)
@@ -77,39 +58,50 @@ class GeminiGroundingNode(Node):
         self._latest_stamp_sec = 0
         self._latest_stamp_nanosec = 0
         self._depth_history = []
-        self._depth_history_limit = max(1, int(self.get_parameter("depth_history_size").value))
         self._camera_info = None
         self._generation = 0
-        self._last_result = {
-            "query": "",
-            "generation": 0,
-            "status": "idle",
-            "status_code": "IDLE",
-            "status_message": "No active query",
-            "source": "gemini_grounding",
-        }
+        self._last_result = initial_idle_payload(source=self.SOURCE)
+
+        self._loop = asyncio.new_event_loop()
+        self._loop_thread = threading.Thread(target=self._run_loop, daemon=True)
+        self._loop_thread.start()
+        self._active_future = None
+        self._active_token = None
 
         self.create_subscription(Image, color_topic_raw, self._color_cb, qos_profile_sensor_data)
         self.create_subscription(Image, depth_topic, self._depth_cb, qos_profile_sensor_data)
         self.create_subscription(CameraInfo, camera_info_topic, self._camera_info_cb, qos_profile_sensor_data)
         self.create_subscription(String, query_topic, self._query_cb, 10)
-        heartbeat_sec = max(0.2, float(self.get_parameter("status_heartbeat_sec").value))
-        self.create_timer(heartbeat_sec, self._heartbeat_cb)
+        self.create_timer(self.config.status_heartbeat_sec, self._heartbeat_cb)
 
-        self.get_logger().info(
-            "Gemini grounding ready: color=%s depth=%s query=%s"
-            % (color_topic_raw, depth_topic, query_topic)
+        log_phase(
+            self,
+            "startup",
+            detail=f"color={color_topic_raw} depth={depth_topic} query={query_topic}",
         )
         self._publish_json(self._result_pub, self._last_result)
 
+    def destroy_node(self):
+        self._cancel_active_query()
+        if self._loop.is_running():
+            self._loop.call_soon_threadsafe(self._loop.stop)
+        if self._loop_thread.is_alive():
+            self._loop_thread.join(timeout=1.0)
+        self._loop.close()
+        return super().destroy_node()
+
+    def _run_loop(self) -> None:
+        asyncio.set_event_loop(self._loop)
+        self._loop.run_forever()
+
     def _trace(self, message: str) -> None:
-        if bool(self.get_parameter("debug_trace").value):
+        if self.config.debug_trace:
             self.get_logger().info(f"[trace] {message}")
 
     def _color_cb(self, msg: Image) -> None:
         try:
             image = self._bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
-            if bool(self.get_parameter("rotate_180").value):
+            if self.config.rotate_180:
                 image = cv2.rotate(image, cv2.ROTATE_180)
             rotated_msg = self._bridge.cv2_to_imgmsg(image, encoding="bgr8")
             rotated_msg.header = msg.header
@@ -133,15 +125,14 @@ class GeminiGroundingNode(Node):
         stamp_ns = int(msg.header.stamp.sec) * 1_000_000_000 + int(msg.header.stamp.nanosec)
         with self._state_lock:
             self._depth_history.append((depth, msg.encoding, stamp_ns))
-            if len(self._depth_history) > self._depth_history_limit:
-                self._depth_history = self._depth_history[-self._depth_history_limit :]
+            if len(self._depth_history) > self.config.max_depth_history_size:
+                self._depth_history = self._depth_history[-self.config.max_depth_history_size :]
 
     def _camera_info_cb(self, msg: CameraInfo) -> None:
         with self._state_lock:
             self._camera_info = msg
 
     def _query_cb(self, msg: String) -> None:
-        query_start = time.monotonic()
         query = msg.data.strip()
         with self._state_lock:
             self._generation += 1
@@ -149,25 +140,30 @@ class GeminiGroundingNode(Node):
             image = None if self._latest_rotated is None else self._latest_rotated.copy()
             stamp_sec = self._latest_stamp_sec
             stamp_nanosec = self._latest_stamp_nanosec
-            depth_count = len(self._depth_history)
-            camera_ready = self._camera_info is not None
+            depth_history = list(self._depth_history)
+            camera_info = self._camera_info
 
-        self._trace(
-            "query received"
-            f" generation={generation} query={query!r}"
-            f" image_ready={image is not None} depth_frames={depth_count} camera_info={camera_ready}"
-        )
+        log_phase(self, "query_received", generation=generation, detail=f"query={query!r}")
+        self._cancel_active_query()
 
         if not query:
-            self._publish_overlay({"status_code": "IDLE", "status_message": "No active query"})
-            self._publish_result(
+            self._publish_overlay(
                 {
                     "query": "",
-                    "generation": int(generation),
-                    "status": "idle",
+                    "generation": generation,
                     "status_code": "IDLE",
                     "status_message": "No active query",
                 }
+            )
+            self._publish_result(
+                build_status_payload(
+                    query="",
+                    generation=generation,
+                    status="idle",
+                    status_code="IDLE",
+                    status_message="No active query",
+                    source=self.SOURCE,
+                )
             )
             return
 
@@ -175,60 +171,81 @@ class GeminiGroundingNode(Node):
             self._publish_error(query, generation, "E_NO_IMAGE", "No image available yet")
             return
 
-        snap = self._snapshot_projection_inputs(stamp_sec, stamp_nanosec)
-        if not snap["ok"]:
-            self._trace(
-                "snapshot failed"
-                f" generation={generation} code={snap.get('code')} message={snap.get('message')}"
-            )
+        snapshot = self._projection.snapshot_inputs(
+            depth_history=depth_history,
+            camera_info=camera_info,
+            image_stamp_sec=stamp_sec,
+            image_stamp_nanosec=stamp_nanosec,
+        )
+        if not snapshot.get("ok", False):
             self._publish_error(
                 query,
                 generation,
-                str(snap["code"]),
-                str(snap["message"]),
+                str(snapshot.get("code", "E_DATA_NOT_READY")),
+                str(snapshot.get("message", "Depth/CameraInfo data is not ready yet")),
                 image_stamp_sec=stamp_sec,
                 image_stamp_nanosec=stamp_nanosec,
             )
             return
 
-        self._trace(
-            "snapshot ready"
-            f" generation={generation} elapsed={time.monotonic() - query_start:.3f}s"
-            f" image_stamp={stamp_sec}.{stamp_nanosec:09d}"
-        )
-
-        self._publish_overlay({"label": query, "status_code": "RUNNING", "status_message": "Processing"})
-        self._publish_result(
+        self._publish_overlay(
             {
                 "query": query,
-                "generation": int(generation),
-                "status": "running",
+                "generation": generation,
                 "status_code": "RUNNING",
                 "status_message": "Vision grounding in progress",
-                "image_stamp": {
-                    "sec": int(stamp_sec),
-                    "nanosec": int(stamp_nanosec),
-                },
             }
         )
+        self._publish_result(
+            build_status_payload(
+                query=query,
+                generation=generation,
+                status="running",
+                status_code="RUNNING",
+                status_message="Vision grounding in progress",
+                source=self.SOURCE,
+                extra={
+                    "image_stamp": {"sec": int(stamp_sec), "nanosec": int(stamp_nanosec)},
+                },
+            )
+        )
 
-        threading.Thread(
-            target=self._process_query,
-            args=(
-                query,
-                generation,
-                image,
-                stamp_sec,
-                stamp_nanosec,
-                snap["depth_frame"],
-                snap["depth_encoding"],
-                snap["camera_info"],
+        token = CancelToken()
+        with self._state_lock:
+            self._active_token = token
+        self._active_future = asyncio.run_coroutine_threadsafe(
+            self._process_query_async(
+                query=query,
+                generation=generation,
+                rotated_image=image,
+                image_stamp_sec=stamp_sec,
+                image_stamp_nanosec=stamp_nanosec,
+                depth_frame=snapshot["depth_frame"],
+                depth_encoding=snapshot["depth_encoding"],
+                camera_info=snapshot["camera_info"],
+                token=token,
             ),
-            daemon=True,
-        ).start()
+            self._loop,
+        )
 
-    def _process_query(
+    def _cancel_active_query(self) -> None:
+        with self._state_lock:
+            token = self._active_token
+            future = self._active_future
+            self._active_token = None
+            self._active_future = None
+        if token is not None:
+            token.cancel()
+        if future is not None and not future.done():
+            future.cancel()
+
+    def _is_current_generation(self, generation: int) -> bool:
+        with self._state_lock:
+            return generation == self._generation
+
+    async def _process_query_async(
         self,
+        *,
         query: str,
         generation: int,
         rotated_image,
@@ -237,448 +254,125 @@ class GeminiGroundingNode(Node):
         depth_frame,
         depth_encoding: str,
         camera_info: CameraInfo,
+        token: CancelToken,
     ) -> None:
         started = time.monotonic()
-        self._trace(
-            "process start"
-            f" generation={generation} query={query!r} stamp={image_stamp_sec}.{image_stamp_nanosec:09d}"
+        log_phase(self, "query_process_start", generation=generation)
+        if token.canceled or not self._is_current_generation(generation):
+            return
+
+        api_key = os.environ.get(self.config.gemini_api_key_env, "").strip()
+        if not api_key:
+            self._publish_error(
+                query,
+                generation,
+                "E_GEMINI_API_KEY",
+                f"{self.config.gemini_api_key_env} is not set",
+                image_stamp_sec=image_stamp_sec,
+                image_stamp_nanosec=image_stamp_nanosec,
+            )
+            return
+
+        detection = await self._gemini.detect_bbox_and_caption(
+            api_key=api_key,
+            query=query,
+            image=rotated_image,
+            cancel_token=token,
         )
-        try:
-            api_key_env = str(self.get_parameter("gemini_api_key_env").value)
-            api_key = os.environ.get(api_key_env, "").strip()
-            if not api_key:
-                if self._is_current(generation):
-                    self._publish_error(
-                        query,
-                        generation,
-                        "E_GEMINI_API_KEY",
-                        f"{api_key_env} is not set",
-                        image_stamp_sec,
-                        image_stamp_nanosec,
-                    )
-                return
-
-            t0 = time.monotonic()
-            detection = self._gemini_detect_bbox_and_caption(api_key, query, rotated_image)
-            self._trace(
-                "detection done"
-                f" generation={generation} ok={detection.get('ok', False)}"
-                f" elapsed={time.monotonic() - t0:.3f}s"
+        if token.canceled or not self._is_current_generation(generation):
+            return
+        if not detection.get("ok", False):
+            self._publish_error(
+                query,
+                generation,
+                "E_DETECTION",
+                str(detection.get("error", "Detection failed")),
+                image_stamp_sec=image_stamp_sec,
+                image_stamp_nanosec=image_stamp_nanosec,
             )
-            if not self._is_current(generation):
-                self._trace(f"generation stale after detection: generation={generation}")
-                return
+            return
 
-            if not detection.get("ok", False):
-                self._publish_error(
-                    query,
-                    generation,
-                    "E_DETECTION",
-                    str(detection.get("error", "Detection failed")),
-                    image_stamp_sec=image_stamp_sec,
-                    image_stamp_nanosec=image_stamp_nanosec,
-                )
-                self._trace(
-                    "detection failed"
-                    f" generation={generation} error={detection.get('error', 'Detection failed')}"
-                    f" total_elapsed={time.monotonic() - started:.3f}s"
-                )
-                return
-
-            confidence = float(detection.get("confidence", 0.0))
-            min_confidence = float(self.get_parameter("min_confidence").value)
-            if confidence < min_confidence:
-                self._publish_error(
-                    query,
-                    generation,
-                    "E_LOW_CONFIDENCE",
-                    f"Detection confidence too low ({confidence:.2f} < {min_confidence:.2f})",
-                    bbox=detection.get("bbox"),
-                    image_stamp_sec=image_stamp_sec,
-                    image_stamp_nanosec=image_stamp_nanosec,
-                )
-                self._trace(
-                    "low confidence"
-                    f" generation={generation} confidence={confidence:.3f} min={min_confidence:.3f}"
-                    f" total_elapsed={time.monotonic() - started:.3f}s"
-                )
-                return
-
-            t1 = time.monotonic()
-            projected = self._project_rotated_bbox_to_map(
-                detection["bbox"],
-                depth_frame,
-                depth_encoding,
-                camera_info,
+        confidence = float(detection.get("confidence", 0.0))
+        if confidence < self.config.default_min_confidence:
+            self._publish_error(
+                query,
+                generation,
+                "E_LOW_CONFIDENCE",
+                (
+                    "Detection confidence too low "
+                    f"({confidence:.2f} < {self.config.default_min_confidence:.2f})"
+                ),
+                bbox=detection.get("bbox"),
+                image_stamp_sec=image_stamp_sec,
+                image_stamp_nanosec=image_stamp_nanosec,
             )
-            self._trace(
-                "projection done"
-                f" generation={generation} ok={projected.get('ok', False)}"
-                f" elapsed={time.monotonic() - t1:.3f}s"
+            return
+
+        projected = self._projection.project_rotated_bbox_to_map(
+            bbox=detection["bbox"],
+            depth_frame=depth_frame,
+            depth_encoding=depth_encoding,
+            camera_info=camera_info,
+            image_stamp_sec=image_stamp_sec,
+            image_stamp_nanosec=image_stamp_nanosec,
+        )
+        if token.canceled or not self._is_current_generation(generation):
+            return
+        if not projected.get("ok", False):
+            self._publish_error(
+                query,
+                generation,
+                str(projected.get("code", "E_PROJECTION")),
+                str(projected.get("message", "Projection failed")),
+                bbox=detection.get("bbox"),
+                image_stamp_sec=image_stamp_sec,
+                image_stamp_nanosec=image_stamp_nanosec,
             )
-            if not self._is_current(generation):
-                self._trace(f"generation stale after projection: generation={generation}")
-                return
+            return
 
-            if not projected.get("ok", False):
-                self._publish_error(
-                    query,
-                    generation,
-                    str(projected.get("code", "E_PROJECTION")),
-                    str(projected.get("message", "Projection failed")),
-                    bbox=detection.get("bbox"),
-                    image_stamp_sec=image_stamp_sec,
-                    image_stamp_nanosec=image_stamp_nanosec,
-                )
-                self._trace(
-                    "projection failed"
-                    f" generation={generation} code={projected.get('code')} msg={projected.get('message')}"
-                    f" total_elapsed={time.monotonic() - started:.3f}s"
-                )
-                return
+        object_map = projected["object_map"]
+        overlay = {
+            "query": query,
+            "generation": int(generation),
+            "label": str(detection.get("label", query)),
+            "confidence": float(detection.get("confidence", 0.0)),
+            "bbox": detection.get("bbox"),
+            "caption": str(detection.get("caption", "")),
+            "representative_pixel": projected["representative_pixel"],
+            "depth_m": float(projected["depth_m"]),
+            "object_map": object_map,
+            "status_code": "OK",
+            "status_message": "Detection/depth/position ready",
+        }
+        self._publish_overlay(overlay)
 
-            object_map = projected["object_map"]
-            overlay = {
-                "label": str(detection.get("label", query)),
-                "confidence": float(detection.get("confidence", 0.0)),
-                "bbox": detection.get("bbox"),
+        result = build_status_payload(
+            query=query,
+            generation=generation,
+            status="success",
+            status_code="OK",
+            status_message="Detection/depth/position ready",
+            source=self.SOURCE,
+            extra={
+                "image_stamp": {"sec": int(image_stamp_sec), "nanosec": int(image_stamp_nanosec)},
+                "detection": {
+                    "label": str(detection.get("label", query)),
+                    "confidence": float(detection.get("confidence", 0.0)),
+                    "bbox": detection.get("bbox"),
+                },
                 "caption": str(detection.get("caption", "")),
-                "representative_pixel": projected["representative_pixel"],
                 "depth_m": float(projected["depth_m"]),
                 "object_map": object_map,
-                "status_code": "OK",
-                "status_message": "Detection/depth/position ready",
-            }
-            self._publish_overlay(overlay)
-
-            self._publish_result(
-                {
-                    "query": query,
-                    "generation": int(generation),
-                    "status": "success",
-                    "status_code": "OK",
-                    "status_message": "Detection/depth/position ready",
-                    "image_stamp": {
-                        "sec": int(image_stamp_sec),
-                        "nanosec": int(image_stamp_nanosec),
-                    },
-                    "detection": {
-                        "label": str(detection.get("label", query)),
-                        "confidence": float(detection.get("confidence", 0.0)),
-                        "bbox": detection.get("bbox"),
-                    },
-                    "caption": str(detection.get("caption", "")),
-                    "depth_m": float(projected["depth_m"]),
-                    "object_map": object_map,
-                    "representative_pixel": projected["representative_pixel"],
-                }
-            )
-            self._trace(
-                "process success"
-                f" generation={generation} map=({object_map['x']:.3f},{object_map['y']:.3f},{object_map['z']:.3f})"
-                f" total_elapsed={time.monotonic() - started:.3f}s"
-            )
-        except Exception as exc:
-            if self._is_current(generation):
-                self._publish_error(
-                    query,
-                    generation,
-                    "E_INTERNAL",
-                    str(exc),
-                    image_stamp_sec=image_stamp_sec,
-                    image_stamp_nanosec=image_stamp_nanosec,
-                )
-            self._trace(
-                "process internal error"
-                f" generation={generation} type={type(exc).__name__} error={exc}"
-                f" total_elapsed={time.monotonic() - started:.3f}s"
-            )
-
-    def _project_rotated_bbox_to_map(
-        self,
-        bbox: dict,
-        depth_frame,
-        depth_encoding: str,
-        camera_info: CameraInfo,
-    ) -> dict:
-        h, w = depth_frame.shape[:2]
-        x0_rot, y0_rot, x1_rot, y1_rot = self._clamp_bbox(
-            int(bbox["x_min"]),
-            int(bbox["y_min"]),
-            int(bbox["x_max"]),
-            int(bbox["y_max"]),
-            w,
-            h,
-        )
-
-        if bool(self.get_parameter("rotate_180").value):
-            x0_raw, y0_raw, x1_raw, y1_raw = self._bbox_rotated_to_raw(x0_rot, y0_rot, x1_rot, y1_rot, w, h)
-            x0_raw, y0_raw, x1_raw, y1_raw = self._clamp_bbox(x0_raw, y0_raw, x1_raw, y1_raw, w, h)
-        else:
-            x0_raw, y0_raw, x1_raw, y1_raw = x0_rot, y0_rot, x1_rot, y1_rot
-
-        center_x = (x0_raw + x1_raw) // 2
-        center_y = (y0_raw + y1_raw) // 2
-
-        depth_m, valid_ratio, rep_x_raw, rep_y_raw = self._depth_from_bbox_nearest_band(
-            depth_frame,
-            depth_encoding,
-            x0_raw,
-            y0_raw,
-            x1_raw,
-            y1_raw,
-            float(self.get_parameter("min_depth_m").value),
-            float(self.get_parameter("max_depth_m").value),
-            float(self.get_parameter("depth_roi_inset_ratio").value),
-            float(self.get_parameter("depth_near_percentile").value),
-            float(self.get_parameter("depth_near_margin_m").value),
-        )
-        if depth_m is None:
-            return {
-                "ok": False,
-                "code": "E_DEPTH_INVALID",
-                "message": "No valid depth in bbox ROI",
-                "confidence": float(valid_ratio),
-            }
-
-        if rep_x_raw is None or rep_y_raw is None:
-            rep_x_raw, rep_y_raw = center_x, center_y
-
-        fx = float(camera_info.k[0])
-        fy = float(camera_info.k[4])
-        cx = float(camera_info.k[2])
-        cy = float(camera_info.k[5])
-        if fx == 0.0 or fy == 0.0:
-            return {
-                "ok": False,
-                "code": "E_CAMERA_INTRINSICS",
-                "message": "Camera intrinsics are invalid",
-            }
-
-        x_cam = (float(rep_x_raw) - cx) * depth_m / fx
-        y_cam = (float(rep_y_raw) - cy) * depth_m / fy
-        z_cam = depth_m
-
-        source_frame = camera_info.header.frame_id.strip()
-        if not source_frame:
-            source_frame = str(self.get_parameter("camera_frame").value).strip()
-        if not source_frame:
-            return {
-                "ok": False,
-                "code": "E_CAMERA_FRAME",
-                "message": "Camera frame is empty in CameraInfo and camera_frame parameter",
-            }
-
-        try:
-            x_map, y_map, z_map = self._transform_to_map(x_cam, y_cam, z_cam, source_frame)
-        except TransformException as exc:
-            map_frame = str(self.get_parameter("map_frame").value)
-            return {
-                "ok": False,
-                "code": "E_TF_LOOKUP",
-                "message": f"TF lookup failed ({source_frame} -> {map_frame}): {exc}",
-            }
-
-        if bool(self.get_parameter("rotate_180").value):
-            rep_x, rep_y = self._pixel_raw_to_rotated(rep_x_raw, rep_y_raw, w, h)
-        else:
-            rep_x, rep_y = rep_x_raw, rep_y_raw
-
-        map_frame = str(self.get_parameter("map_frame").value)
-
-        return {
-            "ok": True,
-            "depth_m": float(depth_m),
-            "confidence": float(valid_ratio),
-            "representative_pixel": {"x": int(rep_x), "y": int(rep_y)},
-            "object_map": {
-                "x": float(x_map),
-                "y": float(y_map),
-                "z": float(z_map),
-                "frame_id": map_frame,
+                "representative_pixel": projected["representative_pixel"],
             },
-        }
-
-    def _snapshot_projection_inputs(self, image_stamp_sec: int, image_stamp_nanosec: int) -> dict:
-        target_ns = int(image_stamp_sec) * 1_000_000_000 + int(image_stamp_nanosec)
-        with self._state_lock:
-            if not self._depth_history or self._camera_info is None:
-                return {
-                    "ok": False,
-                    "code": "E_DATA_NOT_READY",
-                    "message": "Depth/CameraInfo data is not ready yet",
-                }
-
-            depth, encoding, stamp_ns = min(
-                self._depth_history,
-                key=lambda item: abs(item[2] - target_ns),
-            )
-            camera_info = copy.deepcopy(self._camera_info)
-
-        gap_sec = abs(stamp_ns - target_ns) / 1_000_000_000.0 if target_ns > 0 else 0.0
-        max_sync_gap = float(self.get_parameter("max_sync_gap_sec").value)
-        if target_ns > 0 and gap_sec > max_sync_gap:
-            self._trace(
-                f"snapshot sync gap too large gap={gap_sec:.3f}s max={max_sync_gap:.3f}s"
-            )
-            return {
-                "ok": False,
-                "code": "E_TIME_SYNC",
-                "message": f"No depth frame near image stamp (gap={gap_sec:.3f}s, max={max_sync_gap:.3f}s)",
-            }
-
-        return {
-            "ok": True,
-            "depth_frame": depth.copy(),
-            "depth_encoding": str(encoding),
-            "camera_info": camera_info,
-        }
-
-    def _depth_from_bbox_nearest_band(
-        self,
-        depth_img,
-        encoding: str,
-        x_min: int,
-        y_min: int,
-        x_max: int,
-        y_max: int,
-        min_depth_m: float,
-        max_depth_m: float,
-        inset_ratio: float,
-        near_percentile: float,
-        near_margin_m: float,
-    ) -> tuple[float | None, float, int | None, int | None]:
-        h, w = depth_img.shape[:2]
-        x0 = max(0, min(x_min, x_max))
-        y0 = max(0, min(y_min, y_max))
-        x1 = min(w - 1, max(x_min, x_max))
-        y1 = min(h - 1, max(y_min, y_max))
-
-        if x0 > x1 or y0 > y1:
-            return None, 0.0, None, None
-
-        # Use an inset ROI to avoid boundary/background contamination around bbox edges.
-        roi_w = (x1 - x0 + 1)
-        roi_h = (y1 - y0 + 1)
-        inset_ratio = max(0.0, min(0.4, float(inset_ratio)))
-        inset_x = int(round(roi_w * inset_ratio))
-        inset_y = int(round(roi_h * inset_ratio))
-        xi0 = x0 + inset_x
-        yi0 = y0 + inset_y
-        xi1 = x1 - inset_x
-        yi1 = y1 - inset_y
-        if xi0 > xi1 or yi0 > yi1:
-            xi0, yi0, xi1, yi1 = x0, y0, x1, y1
-
-        roi = depth_img[yi0 : yi1 + 1, xi0 : xi1 + 1].astype(np.float32)
-        depth_meters = self._depth_to_meters(roi, encoding)
-        finite = np.isfinite(depth_meters)
-        valid_mask = finite & (depth_meters > 0.0) & (depth_meters >= min_depth_m) & (depth_meters <= max_depth_m)
-
-        total = depth_meters.size
-        valid_count = int(np.count_nonzero(valid_mask))
-        valid_ratio = float(valid_count) / float(total) if total > 0 else 0.0
-        if valid_count == 0:
-            return None, valid_ratio, None, None
-
-        valid_depths = depth_meters[valid_mask]
-        near_percentile = max(0.0, min(100.0, float(near_percentile)))
-        near_cut = float(np.percentile(valid_depths, near_percentile)) + max(0.0, float(near_margin_m))
-        near_mask = valid_mask & (depth_meters <= near_cut)
-        if not np.any(near_mask):
-            near_mask = valid_mask
-
-        selected_depths = depth_meters[near_mask]
-        depth_m = float(np.median(selected_depths))
-
-        # Pick a stable representative pixel near the selected depth band median.
-        diff = np.abs(depth_meters - depth_m)
-        diff[~near_mask] = np.inf
-        flat_idx = int(np.argmin(diff))
-        py, px = np.unravel_index(flat_idx, diff.shape)
-        rep_x = int(xi0 + px)
-        rep_y = int(yi0 + py)
-        return depth_m, valid_ratio, rep_x, rep_y
-
-    @staticmethod
-    def _depth_to_meters(depth_patch: np.ndarray, encoding: str) -> np.ndarray:
-        if encoding.upper() in {"16UC1", "MONO16"}:
-            return depth_patch * 0.001
-        return depth_patch
-
-    def _transform_to_map(
-        self,
-        x: float,
-        y: float,
-        z: float,
-        source_frame: str,
-    ) -> tuple[float, float, float]:
-        map_frame = str(self.get_parameter("map_frame").value)
-        if source_frame == map_frame:
-            return x, y, z
-
-        transform = self._tf_buffer.lookup_transform(
-            map_frame,
-            source_frame,
-            Time(),
-            timeout=Duration(seconds=0.2),
         )
-        t = transform.transform.translation
-        q = transform.transform.rotation
-        rx, ry, rz = self._rotate_vector_by_quat(x, y, z, q.x, q.y, q.z, q.w)
-        return rx + t.x, ry + t.y, rz + t.z
-
-    @staticmethod
-    def _rotate_vector_by_quat(
-        vx: float,
-        vy: float,
-        vz: float,
-        qx: float,
-        qy: float,
-        qz: float,
-        qw: float,
-    ) -> tuple[float, float, float]:
-        tx = 2.0 * (qy * vz - qz * vy)
-        ty = 2.0 * (qz * vx - qx * vz)
-        tz = 2.0 * (qx * vy - qy * vx)
-        rx = vx + qw * tx + (qy * tz - qz * ty)
-        ry = vy + qw * ty + (qz * tx - qx * tz)
-        rz = vz + qw * tz + (qx * ty - qy * tx)
-        return rx, ry, rz
-
-    @staticmethod
-    def _clamp_bbox(
-        x_min: int,
-        y_min: int,
-        x_max: int,
-        y_max: int,
-        width: int,
-        height: int,
-    ) -> tuple[int, int, int, int]:
-        x0 = max(0, min(min(x_min, x_max), width - 1))
-        y0 = max(0, min(min(y_min, y_max), height - 1))
-        x1 = max(0, min(max(x_min, x_max), width - 1))
-        y1 = max(0, min(max(y_min, y_max), height - 1))
-        return x0, y0, x1, y1
-
-    @staticmethod
-    def _bbox_rotated_to_raw(
-        x_min: int,
-        y_min: int,
-        x_max: int,
-        y_max: int,
-        width: int,
-        height: int,
-    ) -> tuple[int, int, int, int]:
-        raw_x_min = (width - 1) - x_max
-        raw_x_max = (width - 1) - x_min
-        raw_y_min = (height - 1) - y_max
-        raw_y_max = (height - 1) - y_min
-        return raw_x_min, raw_y_min, raw_x_max, raw_y_max
-
-    @staticmethod
-    def _pixel_raw_to_rotated(px: int, py: int, width: int, height: int) -> tuple[int, int]:
-        return (width - 1) - px, (height - 1) - py
+        self._publish_result(result)
+        log_phase(
+            self,
+            "query_process_success",
+            generation=generation,
+            detail=f"elapsed={time.monotonic() - started:.3f}s",
+        )
 
     def _publish_json(self, publisher, payload: dict) -> None:
         try:
@@ -686,23 +380,28 @@ class GeminiGroundingNode(Node):
         except Exception as exc:
             self.get_logger().warn(f"Failed to encode JSON payload: {exc}")
             return
-
         msg = String()
         msg.data = encoded
         publisher.publish(msg)
 
     def _publish_overlay(self, payload: dict) -> None:
-        self._publish_json(self._overlay_pub, payload)
+        data = dict(payload)
+        code = str(data.get("status_code", ""))
+        message = str(data.get("status_message", ""))
+        if code and message and "status_detail" not in data:
+            data["status_detail"] = status_detail(code, message)
+        data.setdefault("source", self.SOURCE)
+        self._publish_json(self._overlay_pub, data)
 
     def _publish_result(self, payload: dict) -> None:
         data = dict(payload)
-        data["source"] = "gemini_grounding"
+        data.setdefault("source", self.SOURCE)
+        code = str(data.get("status_code", ""))
+        message = str(data.get("status_message", ""))
+        if code and message and "status_detail" not in data:
+            data["status_detail"] = status_detail(code, message)
         with self._state_lock:
             self._last_result = dict(data)
-        status = str(data.get("status", "unknown"))
-        code = str(data.get("status_code", ""))
-        generation = int(data.get("generation", 0))
-        self._trace(f"publish result generation={generation} status={status} code={code}")
         self._publish_json(self._result_pub, data)
 
     def _heartbeat_cb(self) -> None:
@@ -721,7 +420,8 @@ class GeminiGroundingNode(Node):
         image_stamp_nanosec: int = 0,
     ) -> None:
         overlay = {
-            "label": query,
+            "query": query,
+            "generation": int(generation),
             "status_code": code,
             "status_message": message,
         }
@@ -729,266 +429,23 @@ class GeminiGroundingNode(Node):
             overlay["bbox"] = bbox
         self._publish_overlay(overlay)
 
-        result = {
-            "query": query,
-            "generation": int(generation),
-            "status": "error",
-            "status_code": code,
-            "status_message": message,
-        }
+        extra = {}
         if bbox is not None:
-            result["detection"] = {"bbox": bbox}
+            extra["detection"] = {"bbox": bbox}
         if image_stamp_sec > 0:
-            result["image_stamp"] = {
-                "sec": int(image_stamp_sec),
-                "nanosec": int(image_stamp_nanosec),
-            }
+            extra["image_stamp"] = {"sec": int(image_stamp_sec), "nanosec": int(image_stamp_nanosec)}
+
+        result = build_status_payload(
+            query=query,
+            generation=generation,
+            status="error",
+            status_code=code,
+            status_message=message,
+            source=self.SOURCE,
+            extra=extra,
+        )
         self._publish_result(result)
-
-    def _is_current(self, generation: int) -> bool:
-        with self._state_lock:
-            return generation == self._generation
-
-    def _gemini_detect_bbox_and_caption(self, api_key: str, query: str, image) -> dict:
-        jpeg_quality = int(self.get_parameter("jpeg_quality").value)
-        jpeg_quality = max(40, min(jpeg_quality, 95))
-        ok, jpg = cv2.imencode(".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), jpeg_quality])
-        if not ok:
-            return {"ok": False, "error": "Failed to encode image"}
-
-        image_b64 = base64.b64encode(jpg.tobytes()).decode("ascii")
-        h, w = image.shape[:2]
-
-        model = str(self.get_parameter("gemini_model").value)
-        timeout_sec = float(self.get_parameter("request_timeout_sec").value)
-        temperature = float(self.get_parameter("gemini_temperature").value)
-        max_retries = max(1, int(self.get_parameter("request_max_retries").value))
-        retry_backoff = max(0.0, float(self.get_parameter("request_retry_backoff_sec").value))
-        self._trace(
-            "gemini request start"
-            f" model={model} timeout={timeout_sec:.1f}s retries={max_retries}"
-            f" query={query!r} image={w}x{h} jpeg_bytes={len(jpg)}"
-        )
-
-        prompt = (
-            "You are a vision grounding module. "
-            "Detect one object for the query and return strict JSON. "
-            f"Query: {query}. "
-            f"Image width={w}, height={h}. "
-            "Coordinates must be integer coordinates in range [0,1000] for this image "
-            "(top-left origin, x to right, y to bottom; 0 means min edge, 1000 means max edge). "
-            "If not found, set found=false and bbox to zeros."
-        )
-
-        schema = {
-            "type": "OBJECT",
-            "properties": {
-                "found": {"type": "BOOLEAN"},
-                "label": {"type": "STRING"},
-                "confidence": {"type": "NUMBER"},
-                "bbox": {
-                    "type": "OBJECT",
-                    "properties": {
-                        "x_min": {"type": "INTEGER"},
-                        "y_min": {"type": "INTEGER"},
-                        "x_max": {"type": "INTEGER"},
-                        "y_max": {"type": "INTEGER"},
-                    },
-                    "required": ["x_min", "y_min", "x_max", "y_max"],
-                },
-                "caption": {"type": "STRING"},
-            },
-            "required": ["found", "label", "confidence", "bbox", "caption"],
-        }
-
-        body = {
-            "contents": [
-                {
-                    "role": "user",
-                    "parts": [
-                        {"text": prompt},
-                        {
-                            "inline_data": {
-                                "mime_type": "image/jpeg",
-                                "data": image_b64,
-                            }
-                        },
-                    ],
-                }
-            ],
-            "generationConfig": {
-                "temperature": temperature,
-                "responseMimeType": "application/json",
-                "responseSchema": schema,
-            },
-        }
-
-        endpoint = (
-            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-            f"?key={api_key}"
-        )
-        req = url_request.Request(
-            endpoint,
-            data=json.dumps(body).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-
-        raw = None
-        for attempt in range(1, max_retries + 1):
-            attempt_started = time.monotonic()
-            try:
-                with url_request.urlopen(req, timeout=timeout_sec) as resp:
-                    raw = resp.read().decode("utf-8")
-                self._trace(
-                    "gemini request success"
-                    f" attempt={attempt}/{max_retries}"
-                    f" elapsed={time.monotonic() - attempt_started:.3f}s"
-                    f" response_chars={len(raw)}"
-                )
-                break
-            except url_error.HTTPError as exc:
-                detail = exc.read().decode("utf-8", errors="ignore")
-                self._trace(
-                    "gemini http error"
-                    f" attempt={attempt}/{max_retries} code={exc.code}"
-                    f" elapsed={time.monotonic() - attempt_started:.3f}s"
-                )
-                return {"ok": False, "error": f"Gemini HTTP {exc.code}: {detail}"}
-            except Exception as exc:
-                timeout_error = self._is_timeout_error(exc)
-                self._trace(
-                    "gemini request exception"
-                    f" attempt={attempt}/{max_retries}"
-                    f" timeout={timeout_error}"
-                    f" type={type(exc).__name__} error={exc}"
-                    f" elapsed={time.monotonic() - attempt_started:.3f}s"
-                )
-                if timeout_error and attempt < max_retries:
-                    self.get_logger().warn(
-                        f"Gemini timeout (attempt {attempt}/{max_retries}), retrying in {retry_backoff:.1f}s"
-                    )
-                    if retry_backoff > 0.0:
-                        time.sleep(retry_backoff)
-                    continue
-                if timeout_error:
-                    return {
-                        "ok": False,
-                        "error": (
-                            f"Gemini request timed out after {attempt} attempt(s) "
-                            f"(timeout={timeout_sec:.1f}s)"
-                        ),
-                    }
-                return {"ok": False, "error": f"Gemini request failed: {exc}"}
-
-        if raw is None:
-            return {"ok": False, "error": "Gemini request failed: empty response"}
-
-        parsed = self._parse_response_json(raw)
-        if not isinstance(parsed, dict):
-            self._trace("gemini parse failed: output is not JSON object")
-            return {"ok": False, "error": "Gemini output is not a JSON object"}
-        if not bool(parsed.get("found", False)):
-            self._trace("gemini parse result: target not found")
-            return {"ok": False, "error": "Target object not found"}
-
-        bbox_obj = parsed.get("bbox")
-        if not isinstance(bbox_obj, dict):
-            return {"ok": False, "error": "bbox is missing"}
-
-        try:
-            x_min_raw = float(bbox_obj["x_min"])
-            y_min_raw = float(bbox_obj["y_min"])
-            x_max_raw = float(bbox_obj["x_max"])
-            y_max_raw = float(bbox_obj["y_max"])
-        except Exception:
-            return {"ok": False, "error": "Invalid bbox fields"}
-
-        # Gemini bbox is interpreted as 0..1000 coordinates and mapped to image pixels.
-        x_min = int(round((x_min_raw / 1000.0) * max(1, w - 1)))
-        y_min = int(round((y_min_raw / 1000.0) * max(1, h - 1)))
-        x_max = int(round((x_max_raw / 1000.0) * max(1, w - 1)))
-        y_max = int(round((y_max_raw / 1000.0) * max(1, h - 1)))
-
-        if x_min > x_max:
-            x_min, x_max = x_max, x_min
-        if y_min > y_max:
-            y_min, y_max = y_max, y_min
-
-        x_min = max(0, min(x_min, w - 1))
-        x_max = max(0, min(x_max, w - 1))
-        y_min = max(0, min(y_min, h - 1))
-        y_max = max(0, min(y_max, h - 1))
-        if x_min >= x_max or y_min >= y_max:
-            self._trace(
-                f"gemini parse failed: degenerate bbox ({x_min},{y_min})-({x_max},{y_max})"
-            )
-            return {"ok": False, "error": "Degenerate bbox"}
-
-        try:
-            confidence = float(parsed.get("confidence", 0.0))
-        except Exception:
-            return {"ok": False, "error": "Invalid confidence field"}
-
-        return {
-            "ok": True,
-            "label": str(parsed.get("label", query)),
-            "confidence": confidence,
-            "bbox": {
-                "x_min": x_min,
-                "y_min": y_min,
-                "x_max": x_max,
-                "y_max": y_max,
-            },
-            "caption": str(parsed.get("caption", "")),
-        }
-
-    def _parse_response_json(self, raw: str):
-        try:
-            response_json = json.loads(raw)
-        except Exception:
-            return None
-
-        candidates = response_json.get("candidates")
-        if not isinstance(candidates, list) or not candidates:
-            return None
-
-        parts = candidates[0].get("content", {}).get("parts", [])
-        text_chunks = []
-        for part in parts:
-            if isinstance(part, dict) and isinstance(part.get("text"), str):
-                text_chunks.append(part["text"])
-
-        text = "\n".join(text_chunks).strip()
-        if not text:
-            return None
-
-        if text.startswith("```"):
-            text = re.sub(r"^```(?:json)?\\s*", "", text)
-            text = re.sub(r"\\s*```$", "", text)
-
-        try:
-            return json.loads(text)
-        except Exception:
-            match = re.search(r"\{.*\}", text, flags=re.DOTALL)
-            if not match:
-                return None
-            try:
-                return json.loads(match.group(0))
-            except Exception:
-                return None
-
-    @staticmethod
-    def _is_timeout_error(exc: Exception) -> bool:
-        if isinstance(exc, (TimeoutError, socket.timeout)):
-            return True
-        if isinstance(exc, url_error.URLError):
-            reason = getattr(exc, "reason", None)
-            if isinstance(reason, (TimeoutError, socket.timeout)):
-                return True
-            if reason is not None and "timed out" in str(reason).lower():
-                return True
-        return "timed out" in str(exc).lower()
+        log_phase(self, "query_process_error", generation=generation, level="warn", detail=result["status_detail"])
 
 
 def main() -> None:

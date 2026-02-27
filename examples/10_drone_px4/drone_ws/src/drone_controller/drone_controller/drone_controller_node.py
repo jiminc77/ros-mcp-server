@@ -15,22 +15,19 @@ from rclpy.parameter import Parameter
 from rclpy.parameter_client import AsyncParameterClient
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 
+from drone_controller.config import load_controller_config
+from drone_controller.flight_prep import prepare_for_flight
+from drone_controller.runtime import CancelToken, StatusEnvelope, extract_goal_id, log_phase
+from drone_controller.trajectory_executor import execute_trajectory_goal
+
 
 class DroneMCPBridge(Node):
-    CONTROL_RATE_HZ = 50.0
-    CONTROL_DT = 1.0 / CONTROL_RATE_HZ
-    DEFAULT_SPEED_MPS = 0.8
-    MAX_SETPOINT_ACCEL_MPS2 = 0.8
-    TAKEOFF_TOLERANCE_M = 0.2
-    DEFAULT_TRAJECTORY_TOLERANCE_M = 0.3
-    TAKEOFF_TIMEOUT_SEC = 45.0
-    WAYPOINT_TIMEOUT_SEC = 45.0
-    HOLD_TIME_SEC = 0.5
-    OFFBOARD_PRIME_SEC = 1.0
+    SOURCE = "drone_controller"
 
     def __init__(self):
         super().__init__("drone_mcp_bridge")
         self.callback_group = ReentrantCallbackGroup()
+        self.config = load_controller_config(self)
 
         setpoint_qos = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
@@ -81,11 +78,12 @@ class DroneMCPBridge(Node):
 
         self._goal_lock = Lock()
         self._active_goal_name = ""
+        self._active_goal_id = ""
 
         self.timer = self.create_timer(
-            self.CONTROL_DT, self.timer_callback, callback_group=self.callback_group
+            self.config.control_dt, self.timer_callback, callback_group=self.callback_group
         )
-        self.get_logger().info("--- Drone Bridge Online (Fixed 50Hz + Smoothed Setpoint) ---")
+        log_phase(self, "startup", detail="Drone bridge online")
 
     def state_cb(self, msg: State) -> None:
         self.current_state = msg
@@ -98,22 +96,24 @@ class DroneMCPBridge(Node):
             self.target_pose.pose.position.z = msg.pose.position.z
             self.target_pose.pose.orientation = msg.pose.orientation
             self.is_primed = True
-            self.get_logger().info(
-                f"Local pose locked at x={msg.pose.position.x:.2f}, "
-                f"y={msg.pose.position.y:.2f}, z={msg.pose.position.z:.2f}"
+            log_phase(
+                self,
+                "pose_lock",
+                detail=(
+                    f"x={msg.pose.position.x:.2f} "
+                    f"y={msg.pose.position.y:.2f} z={msg.pose.position.z:.2f}"
+                ),
             )
 
     def timer_callback(self) -> None:
         self.ensure_local_position_tf_params()
-
         if not self.is_primed:
             return
-
         self.target_pose.header.stamp = self.get_clock().now().to_msg()
         self.local_pos_pub.publish(self.target_pose)
 
     def ensure_local_position_tf_params(self) -> None:
-        if self._local_pos_param_pending:
+        if self._local_pos_param_configured or self._local_pos_param_pending:
             return
         now = time.monotonic()
         if now - self._local_pos_param_last_try < 2.0:
@@ -162,19 +162,40 @@ class DroneMCPBridge(Node):
 
         if results and all(r.successful for r in results):
             if not self._local_pos_param_configured:
-                self.get_logger().info("MAVROS local_position TF params set (tf.send=true)")
+                log_phase(self, "param_sync", detail="MAVROS local_position TF params set")
             self._local_pos_param_configured = True
 
-    def _claim_goal(self, name: str) -> tuple[bool, str]:
+    def _claim_goal(self, name: str, goal_id: str) -> tuple[bool, str]:
         if not self._goal_lock.acquire(blocking=False):
             active = self._active_goal_name or "another goal"
-            return False, self._status("E_GOAL_BUSY", f"{active} is already running")
+            active_id = self._active_goal_id or "unknown"
+            return False, f"{active}({active_id})"
         self._active_goal_name = name
+        self._active_goal_id = goal_id
         return True, ""
 
     def _release_goal(self) -> None:
         self._active_goal_name = ""
+        self._active_goal_id = ""
         self._goal_lock.release()
+
+    def _encode_result(
+        self,
+        *,
+        status: str,
+        status_code: str,
+        status_message: str,
+        goal_id: str,
+        generation: int = 0,
+    ) -> str:
+        return StatusEnvelope(
+            status=status,
+            status_code=status_code,
+            status_message=status_message,
+            source=self.SOURCE,
+            generation=generation,
+            goal_id=goal_id,
+        ).to_json()
 
     def _set_target_pose(self, x: float, y: float, z: float) -> None:
         self.target_pose.pose.position.x = x
@@ -190,86 +211,63 @@ class DroneMCPBridge(Node):
         self.target_pose.pose.orientation.z = math.sin(yaw * 0.5)
         self.target_pose.pose.orientation.w = math.cos(yaw * 0.5)
 
-    @staticmethod
-    def _status(code: str, detail: str) -> str:
-        return f"{code}: {detail}"
-
-    async def prepare_for_flight(self) -> tuple[bool, str]:
-        if not self.current_state.connected:
-            message = self._status("E_FCU_NOT_CONNECTED", "FCU not connected")
-            self.get_logger().error(message)
-            return False, message
-
-        if not self.is_primed:
-            message = self._status("E_LOCAL_POSE_NOT_READY", "Local position lock not ready")
-            self.get_logger().warn(message)
-            return False, message
-
-        if not self.mode_cli.wait_for_service(timeout_sec=1.0):
-            message = self._status("E_SET_MODE_SERVICE_UNAVAILABLE", "SetMode service unavailable")
-            self.get_logger().error(message)
-            return False, message
-        if not self.arm_cli.wait_for_service(timeout_sec=1.0):
-            message = self._status("E_ARM_SERVICE_UNAVAILABLE", "Arming service unavailable")
-            self.get_logger().error(message)
-            return False, message
-
-        prime_until = time.monotonic() + self.OFFBOARD_PRIME_SEC
-        while time.monotonic() < prime_until:
-            if not self.current_state.connected:
-                message = self._status("E_FCU_NOT_CONNECTED", "FCU connection lost")
-                self.get_logger().error(message)
-                return False, message
-            time.sleep(self.CONTROL_DT)
-
-        if self.current_state.mode != "OFFBOARD":
-            mode_req = SetMode.Request(custom_mode="OFFBOARD")
-            mode_resp = await self.mode_cli.call_async(mode_req)
-            mode_set = bool(mode_resp and mode_resp.mode_sent) or self.current_state.mode == "OFFBOARD"
-            if not mode_set:
-                message = self._status(
-                    "E_OFFBOARD_SET_FAILED", "Failed to set OFFBOARD mode"
-                )
-                self.get_logger().error(message)
-                return False, message
-
-        if not self.current_state.armed:
-            arm_req = CommandBool.Request(value=True)
-            arm_resp = await self.arm_cli.call_async(arm_req)
-            arm_ok = bool(arm_resp and arm_resp.success) or self.current_state.armed
-            if not arm_ok:
-                last_result = getattr(arm_resp, "result", None) if arm_resp is not None else None
-                message = self._status(
-                    "E_ARM_FAILED",
-                    f"Failed to arm (last_result={last_result}, mode={self.current_state.mode})",
-                )
-                self.get_logger().error(message)
-                return False, message
-
-        return True, ""
-
     async def execute_takeoff(self, goal_handle):
-        claimed, reason = self._claim_goal("takeoff")
+        goal_id = extract_goal_id(goal_handle)
+        claimed, active = self._claim_goal("takeoff", goal_id)
         if not claimed:
             goal_handle.abort()
-            return DroneTakeoff.Result(success=False, message=reason)
+            return DroneTakeoff.Result(
+                success=False,
+                message=self._encode_result(
+                    status="error",
+                    status_code="E_GOAL_BUSY",
+                    status_message=f"{active} is already running",
+                    goal_id=goal_id,
+                ),
+            )
 
+        token = CancelToken()
+        log_phase(self, "takeoff_start", goal_id=goal_id)
         try:
             target_altitude = float(goal_handle.request.target_altitude)
             if target_altitude <= 0.0:
                 goal_handle.abort()
                 return DroneTakeoff.Result(
                     success=False,
-                    message=self._status(
-                        "E_INVALID_REQUEST", "target_altitude must be greater than 0"
+                    message=self._encode_result(
+                        status="error",
+                        status_code="E_INVALID_REQUEST",
+                        status_message="target_altitude must be greater than 0",
+                        goal_id=goal_id,
+                    ),
+                )
+            if target_altitude > self.config.max_takeoff_altitude_m:
+                goal_handle.abort()
+                return DroneTakeoff.Result(
+                    success=False,
+                    message=self._encode_result(
+                        status="error",
+                        status_code="E_INVALID_REQUEST",
+                        status_message=(
+                            "target_altitude exceeds max_takeoff_altitude_m "
+                            f"({target_altitude:.2f} > {self.config.max_takeoff_altitude_m:.2f})"
+                        ),
+                        goal_id=goal_id,
                     ),
                 )
 
-            self.get_logger().info(f"Takeoff goal received: {target_altitude:.2f}m")
-            ready, reason = await self.prepare_for_flight()
+            ready, code, msg = await prepare_for_flight(self, token, goal_id)
             if not ready:
                 goal_handle.abort()
-                return DroneTakeoff.Result(success=False, message=reason)
+                return DroneTakeoff.Result(
+                    success=False,
+                    message=self._encode_result(
+                        status="error",
+                        status_code=code,
+                        status_message=msg,
+                        goal_id=goal_id,
+                    ),
+                )
 
             self._set_target_pose(
                 self.current_pose.pose.position.x,
@@ -281,9 +279,17 @@ class DroneMCPBridge(Node):
             start_time = time.monotonic()
             while rclpy.ok():
                 if goal_handle.is_cancel_requested:
+                    token.cancel()
+                if token.canceled:
                     goal_handle.canceled()
                     return DroneTakeoff.Result(
-                        success=False, message=self._status("E_CANCELED", "Takeoff canceled")
+                        success=False,
+                        message=self._encode_result(
+                            status="error",
+                            status_code="E_CANCELED",
+                            status_message="Takeoff canceled",
+                            goal_id=goal_id,
+                        ),
                     )
 
                 current_z = float(self.current_pose.pose.position.z)
@@ -291,144 +297,76 @@ class DroneMCPBridge(Node):
                 feedback.current_altitude = current_z
                 goal_handle.publish_feedback(feedback)
 
-                if error <= self.TAKEOFF_TOLERANCE_M:
+                if error <= self.config.default_takeoff_tolerance_m:
                     goal_handle.succeed()
                     return DroneTakeoff.Result(
                         success=True,
-                        message=self._status("OK_TAKEOFF_COMPLETE", "Takeoff complete"),
+                        message=self._encode_result(
+                            status="success",
+                            status_code="OK_TAKEOFF_COMPLETE",
+                            status_message="Takeoff complete",
+                            goal_id=goal_id,
+                        ),
                     )
 
-                if time.monotonic() - start_time > self.TAKEOFF_TIMEOUT_SEC:
+                if time.monotonic() - start_time > self.config.timeout_takeoff_sec:
                     goal_handle.abort()
                     return DroneTakeoff.Result(
                         success=False,
-                        message=self._status("E_TAKEOFF_TIMEOUT", "Takeoff timeout"),
+                        message=self._encode_result(
+                            status="error",
+                            status_code="E_TAKEOFF_TIMEOUT",
+                            status_message="Takeoff timeout",
+                            goal_id=goal_id,
+                        ),
                     )
 
-                time.sleep(0.1)
+                await token.sleep(self.config.control_dt)
 
             goal_handle.abort()
             return DroneTakeoff.Result(
-                success=False, message=self._status("E_ROS_SHUTDOWN", "ROS shutdown")
+                success=False,
+                message=self._encode_result(
+                    status="error",
+                    status_code="E_ROS_SHUTDOWN",
+                    status_message="ROS shutdown",
+                    goal_id=goal_id,
+                ),
             )
         finally:
+            log_phase(self, "takeoff_end", goal_id=goal_id)
             self._release_goal()
 
     async def execute_trajectory(self, goal_handle):
-        claimed, reason = self._claim_goal("trajectory")
+        goal_id = extract_goal_id(goal_handle)
+        claimed, active = self._claim_goal("trajectory", goal_id)
         if not claimed:
             goal_handle.abort()
-            return DroneTrajectory.Result(success=False, message=reason)
-
-        try:
-            req = goal_handle.request
-            points = [(float(p.x), float(p.y), float(p.z)) for p in req.points]
-            if not points:
-                goal_handle.abort()
-                return DroneTrajectory.Result(
-                    success=False,
-                    message=self._status("E_INVALID_REQUEST", "No trajectory points provided"),
-                )
-
-            self.get_logger().info(
-                f"Trajectory goal received: {len(points)} points, fly_through={req.fly_through}"
-            )
-            ready, reason = await self.prepare_for_flight()
-            if not ready:
-                goal_handle.abort()
-                return DroneTrajectory.Result(success=False, message=reason)
-
-            speed = float(req.speed) if req.speed > 0.0 else self.DEFAULT_SPEED_MPS
-            tolerance = (
-                float(req.tolerance)
-                if req.tolerance > 0.0
-                else self.DEFAULT_TRAJECTORY_TOLERANCE_M
-            )
-
-            setpoint = [
-                float(self.current_pose.pose.position.x),
-                float(self.current_pose.pose.position.y),
-                float(self.current_pose.pose.position.z),
-            ]
-            virtual_speed = 0.0
-            feedback = DroneTrajectory.Feedback()
-
-            for idx, target in enumerate(points):
-                waypoint_start = time.monotonic()
-
-                while rclpy.ok():
-                    if goal_handle.is_cancel_requested:
-                        goal_handle.canceled()
-                        return DroneTrajectory.Result(
-                            success=False,
-                            message=self._status("E_CANCELED", "Trajectory canceled"),
-                        )
-
-                    dx = target[0] - setpoint[0]
-                    dy = target[1] - setpoint[1]
-                    dz = target[2] - setpoint[2]
-                    dist_setpoint_to_target = math.sqrt(dx * dx + dy * dy + dz * dz)
-
-                    if dist_setpoint_to_target > 1e-4:
-                        decel_distance = (
-                            (virtual_speed * virtual_speed) / (2.0 * self.MAX_SETPOINT_ACCEL_MPS2)
-                        )
-                        if dist_setpoint_to_target <= decel_distance:
-                            virtual_speed = max(
-                                0.0, virtual_speed - self.MAX_SETPOINT_ACCEL_MPS2 * self.CONTROL_DT
-                            )
-                        else:
-                            virtual_speed = min(
-                                speed, virtual_speed + self.MAX_SETPOINT_ACCEL_MPS2 * self.CONTROL_DT
-                            )
-
-                        step = min(dist_setpoint_to_target, virtual_speed * self.CONTROL_DT)
-                        if step > 0.0:
-                            scale = step / dist_setpoint_to_target
-                            setpoint[0] += dx * scale
-                            setpoint[1] += dy * scale
-                            setpoint[2] += dz * scale
-                            self._set_heading_towards(dx, dy)
-                    else:
-                        setpoint[0], setpoint[1], setpoint[2] = target
-                        virtual_speed = 0.0
-
-                    self._set_target_pose(setpoint[0], setpoint[1], setpoint[2])
-
-                    current = (
-                        float(self.current_pose.pose.position.x),
-                        float(self.current_pose.pose.position.y),
-                        float(self.current_pose.pose.position.z),
-                    )
-                    drone_dist_to_target = math.dist(current, target)
-
-                    feedback.current_point_index = idx
-                    feedback.distance_remaining = float(drone_dist_to_target)
-                    goal_handle.publish_feedback(feedback)
-
-                    if drone_dist_to_target <= tolerance:
-                        break
-
-                    if time.monotonic() - waypoint_start > self.WAYPOINT_TIMEOUT_SEC:
-                        goal_handle.abort()
-                        return DroneTrajectory.Result(
-                            success=False,
-                            message=self._status(
-                                "E_WAYPOINT_TIMEOUT", f"Timeout while reaching waypoint {idx}"
-                            ),
-                        )
-
-                    time.sleep(self.CONTROL_DT)
-
-                if not req.fly_through:
-                    time.sleep(self.HOLD_TIME_SEC)
-
-            goal_handle.succeed()
             return DroneTrajectory.Result(
-                success=True,
-                message=self._status("OK_TRAJECTORY_COMPLETE", "Trajectory complete"),
+                success=False,
+                message=self._encode_result(
+                    status="error",
+                    status_code="E_GOAL_BUSY",
+                    status_message=f"{active} is already running",
+                    goal_id=goal_id,
+                ),
+            )
+
+        token = CancelToken()
+        log_phase(self, "trajectory_start", goal_id=goal_id)
+        try:
+            outcome = await execute_trajectory_goal(self, goal_handle, token, goal_id)
+            return DroneTrajectory.Result(
+                success=outcome.success,
+                message=self._encode_result(
+                    status=outcome.status,
+                    status_code=outcome.status_code,
+                    status_message=outcome.status_message,
+                    goal_id=goal_id,
+                ),
             )
         finally:
+            log_phase(self, "trajectory_end", goal_id=goal_id)
             self._release_goal()
 
 
