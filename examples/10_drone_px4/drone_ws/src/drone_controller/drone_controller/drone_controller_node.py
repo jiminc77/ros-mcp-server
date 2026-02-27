@@ -19,8 +19,8 @@ from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy, qos_profile_
 class DroneMCPBridge(Node):
     CONTROL_RATE_HZ = 50.0
     CONTROL_DT = 1.0 / CONTROL_RATE_HZ
-    DEFAULT_SPEED_MPS = 0.5
-    MAX_SETPOINT_ACCEL_MPS2 = 0.5
+    DEFAULT_SPEED_MPS = 0.8
+    MAX_SETPOINT_ACCEL_MPS2 = 0.8
     TAKEOFF_TOLERANCE_M = 0.2
     DEFAULT_TRAJECTORY_TOLERANCE_M = 0.3
     TAKEOFF_TIMEOUT_SEC = 45.0
