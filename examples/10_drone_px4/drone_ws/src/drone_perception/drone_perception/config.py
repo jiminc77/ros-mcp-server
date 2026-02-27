@@ -46,7 +46,7 @@ def load_perception_config(node) -> PerceptionConfig:
         max_depth_history_size=max(
             1, int(_param(node, "max_depth_history_size", 30, "depth_history_size"))
         ),
-        max_sync_gap_sec=float(_param(node, "max_sync_gap_sec", 0.10)),
+        max_sync_gap_sec=float(_param(node, "max_sync_gap_sec", 0.05)),
         min_depth_m=float(_param(node, "min_depth_m", 0.4)),
         max_depth_m=float(_param(node, "max_depth_m", 8.0)),
         default_depth_roi_inset_ratio=float(
@@ -56,7 +56,7 @@ def load_perception_config(node) -> PerceptionConfig:
             _param(node, "default_depth_near_percentile", 15.0, "depth_near_percentile")
         ),
         default_depth_near_margin_m=float(
-            _param(node, "default_depth_near_margin_m", 0.10, "depth_near_margin_m")
+            _param(node, "default_depth_near_margin_m", 0.2, "depth_near_margin_m")
         ),
         map_frame=str(_param(node, "map_frame", "map")),
         camera_frame=str(_param(node, "camera_frame", "")).strip(),

@@ -36,7 +36,7 @@ def load_controller_config(node: Node) -> ControllerConfig:
         default_speed_mps=float(_param(node, "default_speed_mps", 0.8)),
         max_trajectory_speed_mps=max(0.1, float(_param(node, "max_trajectory_speed_mps", 3.0))),
         max_setpoint_accel_mps2=float(_param(node, "max_setpoint_accel_mps2", 0.8)),
-        max_takeoff_altitude_m=max(0.5, float(_param(node, "max_takeoff_altitude_m", 20.0))),
+        max_takeoff_altitude_m=max(0.5, float(_param(node, "max_takeoff_altitude_m", 3.0))),
         default_takeoff_tolerance_m=float(_param(node, "default_takeoff_tolerance_m", 0.2)),
         default_trajectory_tolerance_m=float(
             _param(node, "default_trajectory_tolerance_m", 0.3)
