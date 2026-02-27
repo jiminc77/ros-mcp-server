@@ -627,10 +627,7 @@ def register_action_tools(
                     try:
                         msg_data = json.loads(response)
                         msg_id = msg_data.get("id")
-                        msg_action = msg_data.get("action")
                         if msg_id is not None and msg_id != goal_id:
-                            continue
-                        if msg_action is not None and msg_action != action_name:
                             continue
 
                         # Handle action_result messages (final completion)
