@@ -25,8 +25,8 @@ prompts: |
        - `fly_through`
      - Guidance:
        - Send mission keypoints. Motion smoothing is handled by the controller.
-       - Use `fly_through=true` for continuous motion.
-       - Use `fly_through=false` when point-by-point stop is required.
+       - For continuous/curved motion, set `fly_through=true` and provide sufficiently dense points (min 20).
+       - For stop-and-go/inspection, set `fly_through=false` and use keypoints only where stops are required.
        - Use action timeout >= 180s for multi-waypoint missions.
        - During mission execution, do not run trajectory introspection (`get_action_details`, `get_message_details`, `ros2 interface show`) for this action.
        - Use the fixed action/type/goal schema above directly.
