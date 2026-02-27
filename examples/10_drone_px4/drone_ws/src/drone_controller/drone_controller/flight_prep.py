@@ -5,14 +5,14 @@ from mavros_msgs.srv import CommandBool, SetMode
 from drone_controller.runtime import CancelToken, log_phase
 
 
-async def _wait_for_service(client, timeout_sec: float, token: CancelToken, poll_sec: float = 0.05) -> bool:
+def _wait_for_service(client, timeout_sec: float, token: CancelToken, poll_sec: float = 0.05) -> bool:
     deadline = time.monotonic() + max(0.0, float(timeout_sec))
     while time.monotonic() < deadline:
         if token.canceled:
             return False
         if client.service_is_ready():
             return True
-        if not await token.sleep(poll_sec):
+        if not token.sleep(poll_sec):
             return False
     return client.service_is_ready()
 
@@ -27,10 +27,10 @@ async def prepare_for_flight(node, token: CancelToken, goal_id: str) -> tuple[bo
     if not node.is_primed:
         return False, "E_LOCAL_POSE_NOT_READY", "Local position lock not ready"
 
-    if not await _wait_for_service(node.mode_cli, node.config.timeout_service_ready_sec, token):
+    if not _wait_for_service(node.mode_cli, node.config.timeout_service_ready_sec, token):
         return False, "E_SET_MODE_SERVICE_UNAVAILABLE", "SetMode service unavailable"
 
-    if not await _wait_for_service(node.arm_cli, node.config.timeout_service_ready_sec, token):
+    if not _wait_for_service(node.arm_cli, node.config.timeout_service_ready_sec, token):
         return False, "E_ARM_SERVICE_UNAVAILABLE", "Arming service unavailable"
 
     prime_until = time.monotonic() + node.config.timeout_offboard_prime_sec
@@ -39,7 +39,7 @@ async def prepare_for_flight(node, token: CancelToken, goal_id: str) -> tuple[bo
             return False, "E_CANCELED", "Goal canceled"
         if not node.current_state.connected:
             return False, "E_FCU_NOT_CONNECTED", "FCU connection lost"
-        await token.sleep(node.config.control_dt)
+        token.sleep(node.config.control_dt)
 
     if node.current_state.mode != "OFFBOARD":
         mode_req = SetMode.Request(custom_mode="OFFBOARD")

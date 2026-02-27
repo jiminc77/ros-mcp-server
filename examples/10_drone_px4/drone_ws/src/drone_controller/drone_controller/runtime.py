@@ -1,6 +1,7 @@
-import asyncio
 import json
+import time
 from dataclasses import dataclass
+from threading import Event
 
 
 def status_detail(status_code: str, status_message: str) -> str:
@@ -32,7 +33,7 @@ class StatusEnvelope:
 
 class CancelToken:
     def __init__(self) -> None:
-        self._event = asyncio.Event()
+        self._event = Event()
 
     def cancel(self) -> None:
         self._event.set()
@@ -41,26 +42,24 @@ class CancelToken:
     def canceled(self) -> bool:
         return self._event.is_set()
 
-    async def sleep(self, seconds: float) -> bool:
+    def sleep(self, seconds: float, poll_sec: float = 0.02) -> bool:
         if self.canceled:
             return False
-        timeout = max(0.0, float(seconds))
-        if timeout == 0.0:
-            await asyncio.sleep(0)
-            return not self.canceled
-        try:
-            await asyncio.wait_for(self._event.wait(), timeout=timeout)
-            return False
-        except asyncio.TimeoutError:
-            return not self.canceled
+        deadline = time.monotonic() + max(0.0, float(seconds))
+        while not self.canceled:
+            remain = deadline - time.monotonic()
+            if remain <= 0.0:
+                return True
+            self._event.wait(timeout=min(max(1e-3, poll_sec), remain))
+        return False
 
 
 def extract_goal_id(goal_handle) -> str:
     goal_id = getattr(goal_handle, "goal_id", None)
     raw_uuid = getattr(goal_id, "uuid", None)
-    if raw_uuid:
+    if raw_uuid is not None:
         try:
-            return bytes(raw_uuid).hex()
+            return bytes(int(v) & 0xFF for v in raw_uuid).hex()
         except Exception:
             pass
     return f"goal_{id(goal_handle):x}"

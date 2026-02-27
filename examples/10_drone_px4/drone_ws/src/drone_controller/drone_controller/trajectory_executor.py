@@ -112,10 +112,10 @@ async def execute_trajectory_goal(
                     f"Timeout while reaching waypoint {idx}",
                 )
 
-            await token.sleep(node.config.control_dt)
+            token.sleep(node.config.control_dt)
 
         if not req.fly_through:
-            await token.sleep(node.config.default_hold_time_sec)
+            token.sleep(node.config.default_hold_time_sec)
 
     goal_handle.succeed()
     return TrajectoryOutcome(True, "success", "OK_TRAJECTORY_COMPLETE", "Trajectory complete")

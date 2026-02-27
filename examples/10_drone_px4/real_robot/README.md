@@ -50,6 +50,11 @@ Start the MAVROS node to bridge MAVLink to ROS2 topics.
 ros2 launch mavros px4.launch fcu_url:="serial://{$YOUR_SERIAL_PORT e.g. /dev/ttyUSB0}" gcs_url:="udp://@127.0.0.1"
 ```
 
+**Important:** To ensure the drone's position is properly transformed and tracked, you must enable local position TF publishing before or during operation:
+```bash
+ros2 param set /mavros/local_position tf.send true
+```
+
 ### 4. Launch the Control Node
 ```bash
 # In the drone_ws folder
@@ -57,13 +62,24 @@ source install/setup.bash
 ros2 run drone_controller bridge
 ```
 
-### 5. (Optional) Launch Perception Node for Vision Grounding
-This starts the integrated `gemini_grounding` node.
+### 5. (Optional) Launch Perception Node & UI
+This starts the integrated `gemini_grounding` node utilizing a RealSense camera, along with an optional user interface.
 
+**Terminal A: Perception Node**
 ```bash
+# In the drone_ws folder
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
 ros2 launch drone_perception realsense_grounding.launch.py
+```
+
+**Terminal B: Perception UI (Optional)**
+To monitor the camera stream, detected bounding boxes, and object grounding results in real-time:
+```bash
+# In the drone_ws folder
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+ros2 run drone_perception simple_ui_node
 ```
 
 Vision grounding is handled end-to-end in one node:

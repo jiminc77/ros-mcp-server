@@ -321,7 +321,7 @@ class DroneMCPBridge(Node):
                         ),
                     )
 
-                await token.sleep(self.config.control_dt)
+                token.sleep(self.config.control_dt)
 
             goal_handle.abort()
             return DroneTakeoff.Result(
@@ -330,6 +330,24 @@ class DroneMCPBridge(Node):
                     status="error",
                     status_code="E_ROS_SHUTDOWN",
                     status_message="ROS shutdown",
+                    goal_id=goal_id,
+                ),
+            )
+        except Exception as exc:
+            log_phase(
+                self,
+                "takeoff_exception",
+                goal_id=goal_id,
+                level="error",
+                detail=f"{type(exc).__name__}: {exc}",
+            )
+            goal_handle.abort()
+            return DroneTakeoff.Result(
+                success=False,
+                message=self._encode_result(
+                    status="error",
+                    status_code="E_INTERNAL",
+                    status_message=f"Unhandled exception: {type(exc).__name__}: {exc}",
                     goal_id=goal_id,
                 ),
             )
@@ -362,6 +380,24 @@ class DroneMCPBridge(Node):
                     status=outcome.status,
                     status_code=outcome.status_code,
                     status_message=outcome.status_message,
+                    goal_id=goal_id,
+                ),
+            )
+        except Exception as exc:
+            log_phase(
+                self,
+                "trajectory_exception",
+                goal_id=goal_id,
+                level="error",
+                detail=f"{type(exc).__name__}: {exc}",
+            )
+            goal_handle.abort()
+            return DroneTrajectory.Result(
+                success=False,
+                message=self._encode_result(
+                    status="error",
+                    status_code="E_INTERNAL",
+                    status_message=f"Unhandled exception: {type(exc).__name__}: {exc}",
                     goal_id=goal_id,
                 ),
             )

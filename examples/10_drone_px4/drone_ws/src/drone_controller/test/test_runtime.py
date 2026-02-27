@@ -1,8 +1,7 @@
-import asyncio
 import json
 import unittest
 
-from drone_controller.runtime import CancelToken, StatusEnvelope, status_detail
+from drone_controller.runtime import CancelToken, StatusEnvelope, extract_goal_id, status_detail
 
 
 class RuntimeContractTests(unittest.TestCase):
@@ -28,13 +27,23 @@ class RuntimeContractTests(unittest.TestCase):
         self.assertEqual(data["goal_id"], "abc123")
 
     def test_cancel_token_cancelled_sleep(self):
-        async def _run():
-            token = CancelToken()
-            token.cancel()
-            ok = await token.sleep(0.01)
-            self.assertFalse(ok)
+        token = CancelToken()
+        token.cancel()
+        ok = token.sleep(0.01)
+        self.assertFalse(ok)
 
-        asyncio.run(_run())
+    def test_extract_goal_id_handles_non_bool_uuid_container(self):
+        class BadBoolUuid(list):
+            def __bool__(self):
+                raise ValueError("no bool")
+
+        class GoalId:
+            uuid = BadBoolUuid([0x01, 0x02, 0xAB, 0xCD])
+
+        class GoalHandle:
+            goal_id = GoalId()
+
+        self.assertEqual(extract_goal_id(GoalHandle()), "0102abcd")
 
 
 if __name__ == "__main__":
