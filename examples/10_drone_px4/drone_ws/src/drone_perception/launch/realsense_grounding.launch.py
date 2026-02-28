@@ -40,8 +40,6 @@ def generate_launch_description():
             {"color_rotated_topic": "/drone_perception/color/image_rotated"},
             {"depth_topic": "/camera/camera/aligned_depth_to_color/image_raw"},
             {"camera_info_topic": "/camera/camera/color/camera_info"},
-            {"query_topic": "/drone_perception/object_query"},
-            {"overlay_topic": "/drone_perception/ui_overlay"},
             {"result_topic": "/drone_perception/object_result"},
             {"rotate_180": True},
             {"request_timeout_sec": 30.0},

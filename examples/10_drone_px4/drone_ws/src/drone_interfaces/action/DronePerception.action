@@ -1,0 +1,9 @@
+string query
+---
+bool success
+string message
+---
+int32 generation
+string status
+string status_code
+string status_message

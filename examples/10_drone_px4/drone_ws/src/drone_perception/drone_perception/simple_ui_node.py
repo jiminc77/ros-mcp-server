@@ -15,47 +15,32 @@ class SimpleUiNode(Node):
         super().__init__("simple_ui")
 
         self.declare_parameter("color_topic", "/drone_perception/color/image_rotated")
-        self.declare_parameter("overlay_topic", "/drone_perception/ui_overlay")
         self.declare_parameter("result_topic", "/drone_perception/object_result")
         self.declare_parameter("window_name", "Drone UI")
 
         color_topic = str(self.get_parameter("color_topic").value)
-        overlay_topic = str(self.get_parameter("overlay_topic").value)
         result_topic = str(self.get_parameter("result_topic").value)
         self._window_name = str(self.get_parameter("window_name").value)
 
         self._bridge = CvBridge()
         self._lock = threading.Lock()
-        self._overlay: dict = {}
+        self._observer_data: dict = {}
 
         self.create_subscription(Image, color_topic, self._image_cb, qos_profile_sensor_data)
-        self.create_subscription(String, overlay_topic, self._overlay_cb, 10)
         self.create_subscription(String, result_topic, self._result_cb, 10)
-        self.get_logger().info(
-            f"Simple UI ready: image={color_topic}, overlay={overlay_topic}, result={result_topic}"
-        )
-
-    def _overlay_cb(self, msg: String) -> None:
-        overlay = self._decode_json(msg.data)
-        if overlay is None:
-            return
-
-        with self._lock:
-            self._overlay = overlay
+        self.get_logger().info(f"Simple UI ready: image={color_topic}, observer={result_topic}")
 
     def _result_cb(self, msg: String) -> None:
         result = self._decode_json(msg.data)
         if result is None:
             return
 
-        overlay = self._overlay_from_result(result)
-        if not overlay:
+        observer = self._overlay_from_result(result)
+        if not observer:
             return
 
         with self._lock:
-            merged = dict(self._overlay)
-            merged.update(overlay)
-            self._overlay = merged
+            self._observer_data = observer
 
     def _image_cb(self, msg: Image) -> None:
         try:
@@ -65,9 +50,9 @@ class SimpleUiNode(Node):
             return
 
         with self._lock:
-            overlay = dict(self._overlay)
+            observer = dict(self._observer_data)
 
-        self._draw_overlay(image, overlay)
+        self._draw_overlay(image, observer)
         cv2.imshow(self._window_name, image)
         cv2.waitKey(1)
 

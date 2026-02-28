@@ -18,6 +18,7 @@ find_package(geometry_msgs REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "action/DroneTakeoff.action"
   "action/DroneTrajectory.action"
+  "action/DronePerception.action"
   DEPENDENCIES action_msgs geometry_msgs
 )
 
