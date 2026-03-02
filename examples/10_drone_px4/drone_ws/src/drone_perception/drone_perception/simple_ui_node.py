@@ -21,10 +21,8 @@ class SimpleUiNode(Node):
         self.declare_parameter("window_resizable", True)
         self.declare_parameter("window_width", 1280)
         self.declare_parameter("window_height", 720)
-        self.declare_parameter("info_window_name", "Drone Info")
-        self.declare_parameter("info_window_width", 560)
-        self.declare_parameter("info_window_height", 720)
-        self.declare_parameter("draw_overlay_on_image", False)
+        self.declare_parameter("info_panel_width", 520)
+        self.declare_parameter("draw_overlay_on_image", True)
 
         color_topic = str(self.get_parameter("color_topic").value)
         result_topic = str(self.get_parameter("result_topic").value)
@@ -32,9 +30,7 @@ class SimpleUiNode(Node):
         self._window_resizable = bool(self.get_parameter("window_resizable").value)
         self._window_width = int(self.get_parameter("window_width").value)
         self._window_height = int(self.get_parameter("window_height").value)
-        self._info_window_name = str(self.get_parameter("info_window_name").value)
-        self._info_window_width = int(self.get_parameter("info_window_width").value)
-        self._info_window_height = int(self.get_parameter("info_window_height").value)
+        self._info_panel_width = int(self.get_parameter("info_panel_width").value)
         self._draw_overlay_on_image = bool(self.get_parameter("draw_overlay_on_image").value)
 
         self._bridge = CvBridge()
@@ -60,7 +56,26 @@ class SimpleUiNode(Node):
             return
 
         with self._lock:
-            self._observer_data = observer
+            prev_generation = self._observer_data.get("generation")
+            next_generation = observer.get("generation")
+            if (
+                prev_generation is not None
+                and next_generation is not None
+                and prev_generation != next_generation
+            ):
+                for key in (
+                    "bbox",
+                    "label",
+                    "confidence",
+                    "depth_m",
+                    "object_map",
+                    "caption",
+                    "representative_pixel",
+                    "representative_pixel_x",
+                    "representative_pixel_y",
+                ):
+                    self._observer_data.pop(key, None)
+            self._observer_data.update(observer)
 
     def _image_cb(self, msg: Image) -> None:
         try:
@@ -69,7 +84,7 @@ class SimpleUiNode(Node):
             self.get_logger().warn(f"Failed to decode image: {exc}")
             return
 
-        self._ensure_windows()
+        self._ensure_window()
 
         with self._lock:
             observer = dict(self._observer_data)
@@ -77,26 +92,19 @@ class SimpleUiNode(Node):
         if self._draw_overlay_on_image:
             self._draw_geometry_overlay(image, observer)
 
-        info_panel = self._build_info_panel(observer)
-        cv2.imshow(self._window_name, image)
-        cv2.imshow(self._info_window_name, info_panel)
+        info_panel = self._build_info_panel(observer, target_height=image.shape[0])
+        combined = np.hstack((image, info_panel))
+        cv2.imshow(self._window_name, combined)
         cv2.waitKey(1)
 
-    def _ensure_windows(self) -> None:
+    def _ensure_window(self) -> None:
         if self._window_ready:
             return
 
         flags = cv2.WINDOW_NORMAL if self._window_resizable else cv2.WINDOW_AUTOSIZE
         cv2.namedWindow(self._window_name, flags)
-        cv2.namedWindow(self._info_window_name, flags)
         if self._window_resizable and self._window_width > 0 and self._window_height > 0:
             cv2.resizeWindow(self._window_name, self._window_width, self._window_height)
-        if self._window_resizable and self._info_window_width > 0 and self._info_window_height > 0:
-            cv2.resizeWindow(
-                self._info_window_name,
-                self._info_window_width,
-                self._info_window_height,
-            )
         self._window_ready = True
 
     @staticmethod
@@ -113,6 +121,10 @@ class SimpleUiNode(Node):
     def _overlay_from_result(result: dict) -> dict:
         out = {}
 
+        for key in ("query", "generation", "status", "status_code", "status_message", "source"):
+            if key in result:
+                out[key] = result[key]
+
         det = result.get("detection")
         if isinstance(det, dict):
             if "bbox" in det:
@@ -121,6 +133,13 @@ class SimpleUiNode(Node):
                 out["label"] = det["label"]
             if "confidence" in det:
                 out["confidence"] = det["confidence"]
+        else:
+            if "bbox" in result:
+                out["bbox"] = result["bbox"]
+            if "label" in result:
+                out["label"] = result["label"]
+            if "confidence" in result:
+                out["confidence"] = result["confidence"]
 
         for key in (
             "representative_pixel",
@@ -129,8 +148,6 @@ class SimpleUiNode(Node):
             "depth_m",
             "object_map",
             "caption",
-            "status_code",
-            "status_message",
         ):
             if key in result:
                 out[key] = result[key]
@@ -156,9 +173,9 @@ class SimpleUiNode(Node):
                 -1,
             )
 
-    def _build_info_panel(self, overlay: dict):
-        width = max(320, self._info_window_width)
-        height = max(240, self._info_window_height)
+    def _build_info_panel(self, overlay: dict, *, target_height: int):
+        width = max(320, self._info_panel_width)
+        height = max(240, int(target_height))
         panel = np.full((height, width, 3), (20, 22, 26), dtype=np.uint8)
 
         cv2.putText(
@@ -195,6 +212,18 @@ class SimpleUiNode(Node):
     @staticmethod
     def _build_info_lines(overlay: dict) -> list[str]:
         lines = []
+        query = overlay.get("query")
+        if query:
+            lines.append(f"query: {query}")
+
+        generation = overlay.get("generation")
+        if generation is not None:
+            lines.append(f"generation: {generation}")
+
+        status = overlay.get("status")
+        if status:
+            lines.append(f"state: {status}")
+
         status_code = overlay.get("status_code")
         if status_code:
             lines.append(f"status: {status_code}")
