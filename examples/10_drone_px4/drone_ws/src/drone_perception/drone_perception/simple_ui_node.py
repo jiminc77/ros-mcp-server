@@ -17,14 +17,21 @@ class SimpleUiNode(Node):
         self.declare_parameter("color_topic", "/drone_perception/color/image_rotated")
         self.declare_parameter("result_topic", "/drone_perception/object_result")
         self.declare_parameter("window_name", "Drone UI")
+        self.declare_parameter("window_resizable", True)
+        self.declare_parameter("window_width", 1280)
+        self.declare_parameter("window_height", 720)
 
         color_topic = str(self.get_parameter("color_topic").value)
         result_topic = str(self.get_parameter("result_topic").value)
         self._window_name = str(self.get_parameter("window_name").value)
+        self._window_resizable = bool(self.get_parameter("window_resizable").value)
+        self._window_width = int(self.get_parameter("window_width").value)
+        self._window_height = int(self.get_parameter("window_height").value)
 
         self._bridge = CvBridge()
         self._lock = threading.Lock()
         self._observer_data: dict = {}
+        self._window_ready = False
 
         self.create_subscription(Image, color_topic, self._image_cb, qos_profile_sensor_data)
         self.create_subscription(String, result_topic, self._result_cb, 10)
@@ -49,12 +56,24 @@ class SimpleUiNode(Node):
             self.get_logger().warn(f"Failed to decode image: {exc}")
             return
 
+        self._ensure_window()
+
         with self._lock:
             observer = dict(self._observer_data)
 
         self._draw_overlay(image, observer)
         cv2.imshow(self._window_name, image)
         cv2.waitKey(1)
+
+    def _ensure_window(self) -> None:
+        if self._window_ready:
+            return
+
+        flags = cv2.WINDOW_NORMAL if self._window_resizable else cv2.WINDOW_AUTOSIZE
+        cv2.namedWindow(self._window_name, flags)
+        if self._window_resizable and self._window_width > 0 and self._window_height > 0:
+            cv2.resizeWindow(self._window_name, self._window_width, self._window_height)
+        self._window_ready = True
 
     @staticmethod
     def _decode_json(raw: str) -> dict | None:
