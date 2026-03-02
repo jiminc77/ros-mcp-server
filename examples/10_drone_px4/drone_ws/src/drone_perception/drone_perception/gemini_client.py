@@ -1,4 +1,3 @@
-import asyncio
 import base64
 import json
 import re
@@ -103,7 +102,7 @@ class GeminiClient:
             if cancel_token.canceled:
                 return {"ok": False, "error": "Canceled"}
             try:
-                raw = await asyncio.to_thread(self._request_once, req, self._config.timeout_request_sec)
+                raw = self._request_once(req, self._config.timeout_request_sec)
                 self._trace(
                     "gemini request success"
                     f" attempt={attempt}/{self._config.max_request_retries}"
@@ -121,7 +120,7 @@ class GeminiClient:
                     f" timeout={timeout_error} type={type(exc).__name__} error={exc}"
                 )
                 if timeout_error and attempt < self._config.max_request_retries:
-                    if not await cancel_token.sleep(self._config.timeout_retry_backoff_sec):
+                    if not cancel_token.sleep(self._config.timeout_retry_backoff_sec):
                         return {"ok": False, "error": "Canceled"}
                     continue
                 if timeout_error:
