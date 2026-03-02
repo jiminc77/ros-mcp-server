@@ -2,6 +2,7 @@ import json
 import threading
 
 import cv2
+import numpy as np
 import rclpy
 from cv_bridge import CvBridge
 from rclpy.node import Node
@@ -20,6 +21,10 @@ class SimpleUiNode(Node):
         self.declare_parameter("window_resizable", True)
         self.declare_parameter("window_width", 1280)
         self.declare_parameter("window_height", 720)
+        self.declare_parameter("info_window_name", "Drone Info")
+        self.declare_parameter("info_window_width", 560)
+        self.declare_parameter("info_window_height", 720)
+        self.declare_parameter("draw_overlay_on_image", False)
 
         color_topic = str(self.get_parameter("color_topic").value)
         result_topic = str(self.get_parameter("result_topic").value)
@@ -27,6 +32,10 @@ class SimpleUiNode(Node):
         self._window_resizable = bool(self.get_parameter("window_resizable").value)
         self._window_width = int(self.get_parameter("window_width").value)
         self._window_height = int(self.get_parameter("window_height").value)
+        self._info_window_name = str(self.get_parameter("info_window_name").value)
+        self._info_window_width = int(self.get_parameter("info_window_width").value)
+        self._info_window_height = int(self.get_parameter("info_window_height").value)
+        self._draw_overlay_on_image = bool(self.get_parameter("draw_overlay_on_image").value)
 
         self._bridge = CvBridge()
         self._lock = threading.Lock()
@@ -35,7 +44,11 @@ class SimpleUiNode(Node):
 
         self.create_subscription(Image, color_topic, self._image_cb, qos_profile_sensor_data)
         self.create_subscription(String, result_topic, self._result_cb, 10)
-        self.get_logger().info(f"Simple UI ready: image={color_topic}, observer={result_topic}")
+        self.get_logger().info(
+            "Simple UI ready: "
+            f"image={color_topic}, observer={result_topic}, "
+            f"draw_overlay_on_image={self._draw_overlay_on_image}"
+        )
 
     def _result_cb(self, msg: String) -> None:
         result = self._decode_json(msg.data)
@@ -56,23 +69,34 @@ class SimpleUiNode(Node):
             self.get_logger().warn(f"Failed to decode image: {exc}")
             return
 
-        self._ensure_window()
+        self._ensure_windows()
 
         with self._lock:
             observer = dict(self._observer_data)
 
-        self._draw_overlay(image, observer)
+        if self._draw_overlay_on_image:
+            self._draw_geometry_overlay(image, observer)
+
+        info_panel = self._build_info_panel(observer)
         cv2.imshow(self._window_name, image)
+        cv2.imshow(self._info_window_name, info_panel)
         cv2.waitKey(1)
 
-    def _ensure_window(self) -> None:
+    def _ensure_windows(self) -> None:
         if self._window_ready:
             return
 
         flags = cv2.WINDOW_NORMAL if self._window_resizable else cv2.WINDOW_AUTOSIZE
         cv2.namedWindow(self._window_name, flags)
+        cv2.namedWindow(self._info_window_name, flags)
         if self._window_resizable and self._window_width > 0 and self._window_height > 0:
             cv2.resizeWindow(self._window_name, self._window_width, self._window_height)
+        if self._window_resizable and self._info_window_width > 0 and self._info_window_height > 0:
+            cv2.resizeWindow(
+                self._info_window_name,
+                self._info_window_width,
+                self._info_window_height,
+            )
         self._window_ready = True
 
     @staticmethod
@@ -114,7 +138,7 @@ class SimpleUiNode(Node):
         return out
 
     @staticmethod
-    def _draw_overlay(image, overlay: dict) -> None:
+    def _draw_geometry_overlay(image, overlay: dict) -> None:
         bbox = SimpleUiNode._parse_bbox(overlay, image.shape[:2])
         if bbox is not None:
             x_min, y_min, x_max, y_max = bbox
@@ -132,44 +156,152 @@ class SimpleUiNode(Node):
                 -1,
             )
 
-        det = overlay.get("detection") if isinstance(overlay.get("detection"), dict) else {}
+    def _build_info_panel(self, overlay: dict):
+        width = max(320, self._info_window_width)
+        height = max(240, self._info_window_height)
+        panel = np.full((height, width, 3), (20, 22, 26), dtype=np.uint8)
 
+        cv2.putText(
+            panel,
+            "Drone Perception",
+            (18, 36),
+            cv2.FONT_HERSHEY_DUPLEX,
+            0.85,
+            (245, 245, 245),
+            1,
+            cv2.LINE_AA,
+        )
+        cv2.line(panel, (18, 50), (width - 18, 50), (90, 90, 90), 1)
+
+        lines = self._build_info_lines(overlay)
+        y = 80
+        for line in lines:
+            if y > height - 16:
+                break
+            clipped = self._clip_line(line, width)
+            cv2.putText(
+                panel,
+                clipped,
+                (18, y),
+                cv2.FONT_HERSHEY_DUPLEX,
+                0.58,
+                (220, 235, 220),
+                1,
+                cv2.LINE_AA,
+            )
+            y += 26
+        return panel
+
+    @staticmethod
+    def _build_info_lines(overlay: dict) -> list[str]:
         lines = []
-        label = overlay.get("label", det.get("label"))
+        status_code = overlay.get("status_code")
+        if status_code:
+            lines.append(f"status: {status_code}")
+
+        status_message = overlay.get("status_message")
+        if status_message:
+            lines.append(f"message: {status_message}")
+
+        label = overlay.get("label")
         if label is not None:
             lines.append(f"label: {label}")
 
-        conf = overlay.get("confidence", det.get("confidence"))
+        conf = overlay.get("confidence")
         if conf is not None:
-            try:
-                lines.append(f"conf: {float(conf):.2f}")
-            except Exception:
-                pass
+            lines.append(f"confidence: {SimpleUiNode._format_number(conf)}")
 
         if "depth_m" in overlay:
-            try:
-                lines.append(f"depth: {float(overlay['depth_m']):.2f}m")
-            except Exception:
-                pass
+            lines.append(f"depth(m): {SimpleUiNode._format_number(overlay['depth_m'])}")
 
-        if "object_map" in overlay:
-            lines.append(f"object_map: {overlay['object_map']}")
+        bbox = overlay.get("bbox")
+        if isinstance(bbox, dict):
+            keys = ("x_min", "y_min", "x_max", "y_max")
+            if all(k in bbox for k in keys):
+                lines.append(
+                    "bbox(px): "
+                    f"[{SimpleUiNode._format_number(bbox['x_min'])}, "
+                    f"{SimpleUiNode._format_number(bbox['y_min'])}] -> "
+                    f"[{SimpleUiNode._format_number(bbox['x_max'])}, "
+                    f"{SimpleUiNode._format_number(bbox['y_max'])}]"
+                )
 
-        if "status_code" in overlay:
-            lines.append(f"status: {overlay['status_code']}")
-
-        for idx, line in enumerate(lines):
-            y = 25 + (idx * 24)
-            cv2.putText(
-                image,
-                line,
-                (12, y),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                (50, 255, 50),
-                2,
-                cv2.LINE_AA,
+        rep = overlay.get("representative_pixel")
+        if isinstance(rep, dict) and "x" in rep and "y" in rep:
+            lines.append(
+                "pixel(px): "
+                f"({SimpleUiNode._format_number(rep['x'])}, "
+                f"{SimpleUiNode._format_number(rep['y'])})"
             )
+        elif "representative_pixel_x" in overlay and "representative_pixel_y" in overlay:
+            lines.append(
+                "pixel(px): "
+                f"({SimpleUiNode._format_number(overlay['representative_pixel_x'])}, "
+                f"{SimpleUiNode._format_number(overlay['representative_pixel_y'])})"
+            )
+
+        object_map = overlay.get("object_map")
+        if isinstance(object_map, dict):
+            x = object_map.get("x")
+            y = object_map.get("y")
+            z = object_map.get("z")
+            if x is not None or y is not None or z is not None:
+                lines.append(
+                    "map(m): "
+                    f"({SimpleUiNode._format_number(x)}, "
+                    f"{SimpleUiNode._format_number(y)}, "
+                    f"{SimpleUiNode._format_number(z)})"
+                )
+            frame = object_map.get("frame_id", object_map.get("frame"))
+            if frame:
+                lines.append(f"frame: {frame}")
+        elif object_map is not None:
+            lines.append(f"object_map: {SimpleUiNode._format_json(object_map)}")
+
+        caption = overlay.get("caption")
+        if caption:
+            lines.append(f"caption: {caption}")
+
+        if not lines:
+            lines.append("No detection result yet.")
+        return lines
+
+    @staticmethod
+    def _format_number(value) -> str:
+        if value is None:
+            return "-"
+        try:
+            number = round(float(value), 2)
+        except Exception:
+            return str(value)
+        return f"{number:.2f}".rstrip("0").rstrip(".")
+
+    @staticmethod
+    def _format_json(value) -> str:
+        try:
+            normalized = SimpleUiNode._normalize_for_display(value)
+            return json.dumps(normalized, separators=(",", ":"))
+        except Exception:
+            return str(value)
+
+    @staticmethod
+    def _normalize_for_display(value):
+        if isinstance(value, bool) or value is None or isinstance(value, str):
+            return value
+        if isinstance(value, (int, float)):
+            return round(float(value), 2)
+        if isinstance(value, dict):
+            return {k: SimpleUiNode._normalize_for_display(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [SimpleUiNode._normalize_for_display(v) for v in value]
+        return str(value)
+
+    @staticmethod
+    def _clip_line(text: str, width: int) -> str:
+        max_chars = max(24, int(width / 9))
+        if len(text) <= max_chars:
+            return text
+        return text[: max_chars - 3] + "..."
 
     @staticmethod
     def _parse_bbox(overlay: dict, image_shape):
