@@ -22,7 +22,15 @@ DURATION_KEYS = (
     "latency_ms",
     "elapsed_ms",
 )
-PROMPT_ID_KEYS = ("prompt_id", "promptId", "turn_id", "turnId", "request_id", "requestId")
+PROMPT_ID_KEYS = (
+    "prompt_id",
+    "promptId",
+    "prompt.id",
+    "turn_id",
+    "turnId",
+    "request_id",
+    "requestId",
+)
 PROMPT_TEXT_KEYS = ("prompt", "user_prompt", "text", "prompt_text", "input")
 TOOL_NAME_KEYS = (
     "tool_name",
@@ -47,6 +55,12 @@ END_KEYS = (
     "timestamp",
 )
 STATUS_KEYS = ("status", "result", "outcome", "success", "error", "error_code", "errorCode")
+OMIT_ATTRIBUTE_KEYS = {
+    "experiments.ids",
+    "gen_ai.input.messages",
+    "gen_ai.output.messages",
+    "gen_ai.input.tools",
+}
 
 
 @dataclass
@@ -96,7 +110,33 @@ def load_json_objects(path: Path) -> list[Any]:
     try:
         parsed = json.loads(text)
     except json.JSONDecodeError:
-        return []
+        # Fallback to concatenated JSON stream:
+        # { ... }\n{ ... }\n{ ... }
+        stream_objects: list[Any] = []
+        decoder = json.JSONDecoder()
+        idx = 0
+        length = len(text)
+
+        while idx < length:
+            while idx < length and text[idx].isspace():
+                idx += 1
+            if idx >= length:
+                break
+
+            try:
+                obj, next_idx = decoder.raw_decode(text, idx)
+            except json.JSONDecodeError:
+                next_object_pos = [text.find("{", idx + 1), text.find("[", idx + 1)]
+                next_object_pos = [pos for pos in next_object_pos if pos != -1]
+                if not next_object_pos:
+                    break
+                idx = min(next_object_pos)
+                continue
+
+            stream_objects.append(obj)
+            idx = next_idx
+
+        return stream_objects
 
     if isinstance(parsed, list):
         return parsed
@@ -188,6 +228,17 @@ def parse_timestamp(value: Any) -> datetime | None:
     if isinstance(value, (int, float)):
         return epoch_to_datetime(float(value))
 
+    if isinstance(value, (list, tuple)):
+        if len(value) >= 2:
+            sec = safe_number(value[0])
+            nsec = safe_number(value[1])
+            if sec is not None and nsec is not None:
+                return epoch_to_datetime(sec + (nsec / 1_000_000_000.0))
+        if len(value) == 1:
+            first = safe_number(value[0])
+            if first is not None:
+                return epoch_to_datetime(first)
+
     if isinstance(value, str):
         stripped = value.strip()
         if not stripped:
@@ -233,7 +284,7 @@ def epoch_to_datetime(value: float) -> datetime | None:
 
 
 def event_name_from_record(record: dict[str, Any], attrs: dict[str, Any]) -> str | None:
-    for key in ("name", "event_name", "eventName", "event", "eventType"):
+    for key in ("name", "event.name", "event_name", "eventName", "event", "eventType"):
         value = record.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
@@ -246,7 +297,7 @@ def event_name_from_record(record: dict[str, Any], attrs: dict[str, Any]) -> str
         if isinstance(body_val, str) and body_val.strip():
             return body_val.strip()
 
-    for key in ("event_name", "eventName", "event"):
+    for key in ("event.name", "event_name", "eventName", "event"):
         value = attrs.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
@@ -276,7 +327,28 @@ def extract_duration_ms(record: dict[str, Any], attrs: dict[str, Any]) -> float 
 
 
 def extract_timestamp(record: dict[str, Any], attrs: dict[str, Any]) -> datetime | None:
-    for key in ("timestamp", "time", "timeUnixNano", "observedTimeUnixNano"):
+    for key in (
+        "event.timestamp",
+        "timestamp",
+        "time",
+        "timeUnixNano",
+        "observedTimeUnixNano",
+        "hrTime",
+        "hrTimeObserved",
+    ):
+        ts = parse_timestamp(attrs.get(key))
+        if ts is not None:
+            return ts
+
+    for key in (
+        "event.timestamp",
+        "timestamp",
+        "time",
+        "timeUnixNano",
+        "observedTimeUnixNano",
+        "hrTime",
+        "hrTimeObserved",
+    ):
         ts = parse_timestamp(record.get(key))
         if ts is not None:
             return ts
@@ -312,22 +384,30 @@ def should_keep_event(raw_name: str | None, normalized: str | None) -> bool:
     return False
 
 
+def is_probable_log_record(node: dict[str, Any]) -> bool:
+    return "attributes" in node and any(
+        key in node for key in ("hrTime", "hrTimeObserved", "timestamp", "timeUnixNano", "_body")
+    )
+
+
 def walk_events(node: Any, out: list[Event]) -> None:
     if isinstance(node, dict):
-        attrs = parse_attributes(node.get("attributes"))
-        raw_name = event_name_from_record(node, attrs)
-        name = normalize_event_name(raw_name) if raw_name else ""
+        if is_probable_log_record(node):
+            attrs = parse_attributes(node.get("attributes"))
+            raw_name = event_name_from_record(node, attrs)
+            name = normalize_event_name(raw_name) if raw_name else ""
 
-        if should_keep_event(raw_name, name):
-            out.append(
-                Event(
-                    raw_name=raw_name or "",
-                    name=name,
-                    timestamp=extract_timestamp(node, attrs),
-                    duration_ms=extract_duration_ms(node, attrs),
-                    attributes=attrs,
+            if should_keep_event(raw_name, name):
+                out.append(
+                    Event(
+                        raw_name=raw_name or "",
+                        name=name,
+                        timestamp=extract_timestamp(node, attrs),
+                        duration_ms=extract_duration_ms(node, attrs),
+                        attributes=attrs,
+                    )
                 )
-            )
+            return
 
         for value in node.values():
             walk_events(value, out)
@@ -402,6 +482,18 @@ def sort_key_time(value: datetime | None) -> tuple[int, datetime]:
     return (0, value)
 
 
+def sanitize_attributes(attrs: dict[str, Any], max_str_len: int = 4000) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key, value in attrs.items():
+        if key in OMIT_ATTRIBUTE_KEYS:
+            continue
+        if isinstance(value, str) and len(value) > max_str_len:
+            out[key] = value[:max_str_len] + "...(truncated)"
+        else:
+            out[key] = value
+    return out
+
+
 def build_summary(events: list[Event], source_file: Path, session_id: str) -> dict[str, Any]:
     prompt_events = [event for event in events if event.name == "user_prompt"]
     tool_events = [event for event in events if event.name == "tool_call"]
@@ -411,6 +503,10 @@ def build_summary(events: list[Event], source_file: Path, session_id: str) -> di
     for idx, event in enumerate(prompt_events, start=1):
         attrs = event.attributes
         start_dt, end_dt, duration_ms = compute_start_end(event)
+        if start_dt is None and end_dt is not None:
+            start_dt = end_dt
+        if end_dt is None and start_dt is not None:
+            end_dt = start_dt
         prompt_id_raw = first_value(attrs, PROMPT_ID_KEYS)
         prompt_id = str(prompt_id_raw) if prompt_id_raw is not None else f"prompt-{idx}"
         prompt_text = first_value(attrs, PROMPT_TEXT_KEYS)
@@ -423,7 +519,7 @@ def build_summary(events: list[Event], source_file: Path, session_id: str) -> di
                 "start_time": iso_or_none(start_dt),
                 "end_time": iso_or_none(end_dt),
                 "duration_ms": duration_ms,
-                "attributes": attrs,
+                "attributes": sanitize_attributes(attrs),
                 "tools": [],
             }
         )
@@ -439,6 +535,39 @@ def build_summary(events: list[Event], source_file: Path, session_id: str) -> di
     prompt_id_to_indexes: dict[str, list[int]] = {}
     for idx, prompt in enumerate(prompts):
         prompt_id_to_indexes.setdefault(prompt["prompt_id"], []).append(idx)
+
+    # Expand prompt completion time using all related events for that prompt_id.
+    for event in events:
+        attrs = event.attributes
+        prompt_id_raw = first_value(attrs, PROMPT_ID_KEYS)
+        if prompt_id_raw is None:
+            continue
+        prompt_id = str(prompt_id_raw)
+        candidate_indexes = prompt_id_to_indexes.get(prompt_id, [])
+        if not candidate_indexes:
+            continue
+
+        idx = candidate_indexes[-1]
+        prompt = prompts[idx]
+
+        ev_start, ev_end, _ = compute_start_end(event)
+        ev_start = ev_start or ev_end
+        ev_end = ev_end or ev_start
+        if ev_start is None and ev_end is None:
+            continue
+
+        prompt_start = parse_timestamp(prompt.get("start_time"))
+        prompt_end = parse_timestamp(prompt.get("end_time"))
+
+        if prompt_start is None or (ev_start is not None and ev_start < prompt_start):
+            prompt_start = ev_start
+        if prompt_end is None or (ev_end is not None and ev_end > prompt_end):
+            prompt_end = ev_end
+
+        prompt["start_time"] = iso_or_none(prompt_start)
+        prompt["end_time"] = iso_or_none(prompt_end)
+        if prompt_start is not None and prompt_end is not None:
+            prompt["duration_ms"] = max((prompt_end - prompt_start).total_seconds() * 1000.0, 0.0)
 
     orphan_tools: list[dict[str, Any]] = []
 
@@ -456,7 +585,7 @@ def build_summary(events: list[Event], source_file: Path, session_id: str) -> di
             "duration_ms": duration_ms,
             "status": normalize_status(attrs),
             "prompt_id": None,
-            "attributes": attrs,
+            "attributes": sanitize_attributes(attrs),
         }
 
         prompt_id_raw = first_value(attrs, PROMPT_ID_KEYS)
