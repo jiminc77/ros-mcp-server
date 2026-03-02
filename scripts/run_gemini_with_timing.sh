@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PARSER="${SCRIPT_DIR}/summarize_gemini_telemetry.py"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 GEMINI_BIN="${GEMINI_BIN:-gemini}"
 LOG_ROOT="${GEMINI_TIMING_LOG_DIR:-$HOME/.gemini/timing_logs}"
@@ -26,9 +27,13 @@ export GEMINI_TELEMETRY_OUTFILE="${RAW_LOG}"
 
 echo "[gemini-timing] session_id=${SESSION_ID}" >&2
 echo "[gemini-timing] raw_log=${RAW_LOG}" >&2
+echo "[gemini-timing] workspace_root=${PROJECT_ROOT}" >&2
 
 set +e
-"${GEMINI_BIN}" "$@"
+(
+  cd "${PROJECT_ROOT}"
+  "${GEMINI_BIN}" "$@"
+)
 EXIT_CODE=$?
 set -e
 
@@ -54,6 +59,7 @@ if [[ -s "${RAW_LOG}" ]]; then
   fi
 else
   echo "[gemini-timing] warning: telemetry raw log is empty (${RAW_LOG})" >&2
+  echo "[gemini-timing] hint: check ~/.gemini/settings.json telemetry.enabled/target and Gemini CLI version." >&2
 fi
 
 exit ${EXIT_CODE}
