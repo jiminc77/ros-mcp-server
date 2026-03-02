@@ -21,18 +21,31 @@ fi
 mkdir -p "${SESSION_DIR}"
 
 # Keep default Gemini CLI UI and behavior while enabling local telemetry export.
+# New telemetry env key (current docs) + legacy key (backward compatibility).
+export GEMINI_TELEMETRY_ENABLED=true
 export GEMINI_TELEMETRY=true
 export GEMINI_TELEMETRY_TARGET=local
 export GEMINI_TELEMETRY_OUTFILE="${RAW_LOG}"
+export GEMINI_TELEMETRY_LOG_PROMPTS=true
 
 echo "[gemini-timing] session_id=${SESSION_ID}" >&2
 echo "[gemini-timing] raw_log=${RAW_LOG}" >&2
 echo "[gemini-timing] workspace_root=${PROJECT_ROOT}" >&2
 
+TELEMETRY_ARGS=()
+if "${GEMINI_BIN}" --help 2>&1 | grep -q -- "--telemetry"; then
+  TELEMETRY_ARGS=(
+    --telemetry
+    --telemetry-target local
+    --telemetry-outfile "${RAW_LOG}"
+    --telemetry-log-prompts
+  )
+fi
+
 set +e
 (
   cd "${PROJECT_ROOT}"
-  "${GEMINI_BIN}" "$@"
+  "${GEMINI_BIN}" "${TELEMETRY_ARGS[@]}" "$@"
 )
 EXIT_CODE=$?
 set -e
