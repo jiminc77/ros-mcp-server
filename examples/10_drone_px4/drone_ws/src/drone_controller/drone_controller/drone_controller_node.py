@@ -227,6 +227,7 @@ class DroneMCPBridge(Node):
             )
 
         token = CancelToken()
+        success_result = None
         log_phase(self, "takeoff_start", goal_id=goal_id)
         try:
             target_altitude = float(goal_handle.request.target_altitude)
@@ -303,7 +304,6 @@ class DroneMCPBridge(Node):
                     last_feedback_ts = now
 
                 if error <= self.config.default_takeoff_tolerance_m:
-                    goal_handle.succeed()
                     result = DroneTakeoff.Result()
                     result.success = True
                     result.message = self._encode_result(
@@ -312,7 +312,8 @@ class DroneMCPBridge(Node):
                         status_message="Takeoff complete",
                         goal_id=goal_id,
                     )
-                    return result
+                    success_result = result
+                    break
 
                 if time.monotonic() - start_time > self.config.timeout_takeoff_sec:
                     goal_handle.abort()
@@ -328,16 +329,18 @@ class DroneMCPBridge(Node):
 
                 token.sleep(self.config.control_dt)
 
-            goal_handle.abort()
-            return DroneTakeoff.Result(
-                success=False,
-                message=self._encode_result(
-                    status="error",
-                    status_code="E_ROS_SHUTDOWN",
-                    status_message="ROS shutdown",
-                    goal_id=goal_id,
-                ),
-            )
+            if success_result is None:
+                goal_handle.abort()
+                return DroneTakeoff.Result(
+                    success=False,
+                    message=self._encode_result(
+                        status="error",
+                        status_code="E_ROS_SHUTDOWN",
+                        status_message="ROS shutdown",
+                        goal_id=goal_id,
+                    ),
+                )
+
         except Exception as exc:
             log_phase(
                 self,
@@ -360,6 +363,9 @@ class DroneMCPBridge(Node):
             log_phase(self, "takeoff_end", goal_id=goal_id)
             self._release_goal()
 
+        goal_handle.succeed()
+        return success_result
+
     async def execute_trajectory(self, goal_handle):
         goal_id = extract_goal_id(goal_handle)
         claimed, active = self._claim_goal("trajectory", goal_id)
@@ -376,6 +382,7 @@ class DroneMCPBridge(Node):
             )
 
         token = CancelToken()
+        success_result = None
         log_phase(self, "trajectory_start", goal_id=goal_id)
         try:
             outcome = await execute_trajectory_goal(self, goal_handle, token, goal_id)
@@ -387,7 +394,10 @@ class DroneMCPBridge(Node):
                 status_message=outcome.status_message,
                 goal_id=goal_id,
             )
-            return result
+            if outcome.success:
+                success_result = result
+            else:
+                return result
         except Exception as exc:
             log_phase(
                 self,
@@ -409,6 +419,9 @@ class DroneMCPBridge(Node):
         finally:
             log_phase(self, "trajectory_end", goal_id=goal_id)
             self._release_goal()
+
+        goal_handle.succeed()
+        return success_result
 
 
 def main():

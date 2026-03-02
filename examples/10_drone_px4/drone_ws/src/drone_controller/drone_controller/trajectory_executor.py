@@ -122,5 +122,4 @@ async def execute_trajectory_goal(
         if not req.fly_through:
             token.sleep(node.config.default_hold_time_sec)
 
-    goal_handle.succeed()
     return TrajectoryOutcome(True, "success", "OK_TRAJECTORY_COMPLETE", "Trajectory complete")
