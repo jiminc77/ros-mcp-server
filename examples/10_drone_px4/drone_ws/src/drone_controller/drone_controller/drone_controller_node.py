@@ -304,15 +304,15 @@ class DroneMCPBridge(Node):
 
                 if error <= self.config.default_takeoff_tolerance_m:
                     goal_handle.succeed()
-                    return DroneTakeoff.Result(
-                        success=True,
-                        message=self._encode_result(
-                            status="success",
-                            status_code="OK_TAKEOFF_COMPLETE",
-                            status_message="Takeoff complete",
-                            goal_id=goal_id,
-                        ),
+                    result = DroneTakeoff.Result()
+                    result.success = True
+                    result.message = self._encode_result(
+                        status="success",
+                        status_code="OK_TAKEOFF_COMPLETE",
+                        status_message="Takeoff complete",
+                        goal_id=goal_id,
                     )
+                    return result
 
                 if time.monotonic() - start_time > self.config.timeout_takeoff_sec:
                     goal_handle.abort()
@@ -379,15 +379,15 @@ class DroneMCPBridge(Node):
         log_phase(self, "trajectory_start", goal_id=goal_id)
         try:
             outcome = await execute_trajectory_goal(self, goal_handle, token, goal_id)
-            return DroneTrajectory.Result(
-                success=outcome.success,
-                message=self._encode_result(
-                    status=outcome.status,
-                    status_code=outcome.status_code,
-                    status_message=outcome.status_message,
-                    goal_id=goal_id,
-                ),
+            result = DroneTrajectory.Result()
+            result.success = bool(outcome.success)
+            result.message = self._encode_result(
+                status=outcome.status,
+                status_code=outcome.status_code,
+                status_message=outcome.status_message,
+                goal_id=goal_id,
             )
+            return result
         except Exception as exc:
             log_phase(
                 self,
