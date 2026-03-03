@@ -243,6 +243,7 @@ def run_one(
             rosbag_proc = subprocess.Popen(
                 rosbag_cmd,
                 cwd=str(cfg.workspace_root),
+                stdin=subprocess.DEVNULL,
                 stdout=bag_log,
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
@@ -267,7 +268,14 @@ def run_one(
             gemini_env["GEMINI_TIMING_SESSION_ID"] = session_id
             wrapper_cmd = [str(wrapper_script), *cfg.gemini_args]
             # Keep stdin/stdout/stderr inherited from the current terminal for full interactivity.
-            gemini_exit_code = subprocess.call(wrapper_cmd, cwd=str(cfg.workspace_root), env=gemini_env)
+            gemini_exit_code = subprocess.call(
+                wrapper_cmd,
+                cwd=str(cfg.workspace_root),
+                env=gemini_env,
+                stdin=sys.stdin,
+                stdout=sys.stdout,
+                stderr=sys.stderr,
+            )
 
             rosbag_exit_code = stop_process_group(rosbag_proc, timeout_sec=cfg.rosbag_shutdown_sec)
 
