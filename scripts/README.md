@@ -29,3 +29,107 @@ Files:
 Environment overrides:
 - `GEMINI_TIMING_LOG_DIR` to change log output root directory
 - `GEMINI_BIN` to use a non-default Gemini executable
+
+---
+
+## Batch Experiment Automation (Gemini + rosbag)
+
+`run_experiment_batch.py` automates repeated experiment runs with:
+- automatic `RUN_ID` generation
+- automatic folder creation
+- automatic `ros2 bag record` start/stop
+- automatic Gemini telemetry collection via `run_gemini_with_timing.sh`
+- resume support (skip completed runs)
+
+### Profile file
+
+Default profile:
+- `scripts/experiment_profiles.json`
+
+It defines:
+- task/condition/environment mapping
+- canonical prompt per task
+- topic list to record for rosbag
+- suggested timeout per task
+
+### Basic usage
+
+```bash
+cd /<ABSOLUTE_PATH>/ros-mcp-server
+./scripts/run_experiment_batch.sh \
+  --task T1-2 \
+  --condition C2 \
+  --env sim \
+  --repeats 20
+```
+
+When each run starts:
+1. rosbag recording starts automatically.
+2. Gemini CLI opens automatically.
+3. You interact in Gemini, then exit Gemini.
+4. rosbag stops and artifacts are saved.
+5. Next run starts.
+
+### Resume usage
+
+If the batch stops at run 4, restart with:
+
+```bash
+./scripts/run_experiment_batch.sh \
+  --task T1-2 \
+  --condition C2 \
+  --env sim \
+  --repeats 20 \
+  --resume
+```
+
+Completed runs are preserved and skipped.
+
+### Start from specific run index
+
+```bash
+./scripts/run_experiment_batch.sh \
+  --task T2 \
+  --condition P2 \
+  --env real \
+  --repeats 10 \
+  --from-run 4
+```
+
+### Output structure
+
+Artifacts are stored under:
+- `experiments/<task>/<condition>/<env>/`
+
+Per run:
+- `experiments/<task>/<condition>/<env>/<RUN_ID>/status.json`
+- `experiments/<task>/<condition>/<env>/<RUN_ID>/run_meta.json`
+- `experiments/<task>/<condition>/<env>/<RUN_ID>/attempts/attempt_XXX/`
+  - `rosbag/` (contains `metadata.yaml`)
+  - `gemini/session_report.json`
+  - `gemini/session_report.txt`
+  - `gemini/telemetry_raw.jsonl`
+
+Batch manifest:
+- `experiments/<task>/<condition>/<env>/manifest.jsonl`
+
+### Validate artifacts
+
+```bash
+python3 ./scripts/check_run_artifacts.py \
+  --run-dir experiments/T1-2/C2/sim/T1-2_C2_SIM_004
+```
+
+Or validate a specific attempt:
+
+```bash
+python3 ./scripts/check_run_artifacts.py \
+  --attempt-dir experiments/T1-2/C2/sim/T1-2_C2_SIM_004/attempts/attempt_001
+```
+
+### Notes
+
+- Required commands: `ros2`, `gemini`, `python3`
+- The batch runner is stop-on-failure by default.
+- Use `--continue-on-failure` if you want to keep going after a failed run.
+- You can override Gemini binary with `GEMINI_BIN`.

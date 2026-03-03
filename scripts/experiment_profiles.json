@@ -1,0 +1,135 @@
+{
+  "version": 1,
+  "tasks": {
+    "T1-1": {
+      "name": "Takeoff",
+      "prompt": "Take off to 1 meter and hold position.",
+      "timeout_sec": 60,
+      "topics": [
+        "/mavros/setpoint_position/local",
+        "/mavros/local_position/pose",
+        "/mavros/state",
+        "/drone_control/takeoff/_action/result"
+      ],
+      "conditions": {
+        "C1": {
+          "description": "LLM only (no control node)",
+          "environments": [
+            "sim"
+          ]
+        },
+        "C2": {
+          "description": "LLM + control node",
+          "environments": [
+            "sim"
+          ]
+        },
+        "C3": {
+          "description": "LLM + control node",
+          "environments": [
+            "real"
+          ]
+        }
+      }
+    },
+    "T1-2": {
+      "name": "Circle (diameter 1m)",
+      "prompt": "Take off to 1 meter, fly one circle with diameter 1 meter, then hover.",
+      "timeout_sec": 120,
+      "topics": [
+        "/mavros/setpoint_position/local",
+        "/mavros/local_position/pose",
+        "/mavros/state",
+        "/drone_control/trajectory/_action/result"
+      ],
+      "conditions": {
+        "C1": {
+          "description": "LLM only (no control node)",
+          "environments": [
+            "sim"
+          ]
+        },
+        "C2": {
+          "description": "LLM + control node",
+          "environments": [
+            "sim"
+          ]
+        },
+        "C3": {
+          "description": "LLM + control node",
+          "environments": [
+            "real"
+          ]
+        }
+      }
+    },
+    "T2": {
+      "name": "Object localization",
+      "prompt": "Find the red box and estimate its 3D location in map frame.",
+      "timeout_sec": 30,
+      "topics": [
+        "/drone_perception/detect_object/_action/result",
+        "/drone_perception/object_result",
+        "/mocap/red_box/pose",
+        "/mavros/local_position/pose",
+        "/mavros/state"
+      ],
+      "conditions": {
+        "P1": {
+          "description": "Raw chain (no perception node)",
+          "environments": [
+            "real"
+          ]
+        },
+        "P2": {
+          "description": "LLM + perception node",
+          "environments": [
+            "real"
+          ]
+        }
+      }
+    },
+    "T3-1": {
+      "name": "Identify, approach, orbit",
+      "prompt": "Find the red box, approach it to 1 meter standoff distance, and orbit around it once.",
+      "timeout_sec": 120,
+      "topics": [
+        "/mavros/local_position/pose",
+        "/mavros/state",
+        "/drone_control/trajectory/_action/result",
+        "/drone_perception/detect_object/_action/result",
+        "/drone_perception/object_result",
+        "/mocap/red_box/pose"
+      ],
+      "conditions": {
+        "S1": {
+          "description": "Perception-based control",
+          "environments": [
+            "real"
+          ]
+        }
+      }
+    },
+    "T3-2": {
+      "name": "Obstacle avoidance mission",
+      "prompt": "Fly to the goal waypoint while avoiding obstacles and keep a safe clearance.",
+      "timeout_sec": 120,
+      "topics": [
+        "/mavros/local_position/pose",
+        "/mavros/state",
+        "/drone_control/trajectory/_action/result",
+        "/mocap/obstacle_1/pose",
+        "/mocap/obstacle_2/pose",
+        "/mocap/goal/pose"
+      ],
+      "conditions": {
+        "S2": {
+          "description": "Perception-based control",
+          "environments": [
+            "real"
+          ]
+        }
+      }
+    }
+  }
+}
