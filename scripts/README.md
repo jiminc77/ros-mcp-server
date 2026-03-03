@@ -53,6 +53,9 @@ It defines:
 - topic list to record for rosbag
 - suggested timeout per task
 
+Action notes:
+- For ROS 2 actions, prefer recording `/_action/status` and `/_action/feedback` topics.
+
 ### Basic usage
 
 ```bash

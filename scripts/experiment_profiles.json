@@ -9,7 +9,8 @@
         "/mavros/setpoint_position/local",
         "/mavros/local_position/pose",
         "/mavros/state",
-        "/drone_control/takeoff/_action/result"
+        "/drone_control/takeoff/_action/status",
+        "/drone_control/takeoff/_action/feedback"
       ],
       "conditions": {
         "C1": {
@@ -40,7 +41,8 @@
         "/mavros/setpoint_position/local",
         "/mavros/local_position/pose",
         "/mavros/state",
-        "/drone_control/trajectory/_action/result"
+        "/drone_control/trajectory/_action/status",
+        "/drone_control/trajectory/_action/feedback"
       ],
       "conditions": {
         "C1": {
@@ -68,7 +70,8 @@
       "prompt": "Find the red box and estimate its 3D location in map frame.",
       "timeout_sec": 30,
       "topics": [
-        "/drone_perception/detect_object/_action/result",
+        "/drone_perception/detect_object/_action/status",
+        "/drone_perception/detect_object/_action/feedback",
         "/drone_perception/object_result",
         "/mocap/red_box/pose",
         "/mavros/local_position/pose",
@@ -96,8 +99,10 @@
       "topics": [
         "/mavros/local_position/pose",
         "/mavros/state",
-        "/drone_control/trajectory/_action/result",
-        "/drone_perception/detect_object/_action/result",
+        "/drone_control/trajectory/_action/status",
+        "/drone_control/trajectory/_action/feedback",
+        "/drone_perception/detect_object/_action/status",
+        "/drone_perception/detect_object/_action/feedback",
         "/drone_perception/object_result",
         "/mocap/red_box/pose"
       ],
@@ -117,7 +122,8 @@
       "topics": [
         "/mavros/local_position/pose",
         "/mavros/state",
-        "/drone_control/trajectory/_action/result",
+        "/drone_control/trajectory/_action/status",
+        "/drone_control/trajectory/_action/feedback",
         "/mocap/obstacle_1/pose",
         "/mocap/obstacle_2/pose",
         "/mocap/goal/pose"
