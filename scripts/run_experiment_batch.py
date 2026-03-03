@@ -167,26 +167,6 @@ class RunnerConfig:
     gemini_args: list[str]
 
 
-def call_interactive(cmd: list[str], *, cwd: Path, env: dict[str, str]) -> int:
-    """Run command with best-effort TTY binding for interactive CLI tools."""
-    try:
-        tty = open("/dev/tty", "r+", encoding="utf-8", errors="replace")
-    except OSError:
-        return subprocess.call(cmd, cwd=str(cwd), env=env)
-
-    try:
-        return subprocess.call(
-            cmd,
-            cwd=str(cwd),
-            env=env,
-            stdin=tty,
-            stdout=tty,
-            stderr=tty,
-        )
-    finally:
-        tty.close()
-
-
 def run_one(
     cfg: RunnerConfig,
     *,
@@ -286,7 +266,8 @@ def run_one(
             gemini_env["GEMINI_TIMING_LOG_DIR"] = str(gemini_raw_root)
             gemini_env["GEMINI_TIMING_SESSION_ID"] = session_id
             wrapper_cmd = [str(wrapper_script), *cfg.gemini_args]
-            gemini_exit_code = call_interactive(wrapper_cmd, cwd=cfg.workspace_root, env=gemini_env)
+            # Keep stdin/stdout/stderr inherited from the current terminal for full interactivity.
+            gemini_exit_code = subprocess.call(wrapper_cmd, cwd=str(cfg.workspace_root), env=gemini_env)
 
             rosbag_exit_code = stop_process_group(rosbag_proc, timeout_sec=cfg.rosbag_shutdown_sec)
 
