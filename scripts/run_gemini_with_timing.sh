@@ -8,6 +8,7 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 GEMINI_BIN="${GEMINI_BIN:-gemini}"
 LOG_ROOT="${GEMINI_TIMING_LOG_DIR:-$HOME/.gemini/timing_logs}"
 SESSION_ID="${GEMINI_TIMING_SESSION_ID:-$(date '+%Y%m%d-%H%M%S')}"
+GEMINI_DEFAULT_ARGS="${GEMINI_DEFAULT_ARGS:---yolo}"
 SESSION_DIR="${LOG_ROOT}/${SESSION_ID}"
 RAW_LOG="${SESSION_DIR}/telemetry_raw.jsonl"
 TEXT_REPORT="${SESSION_DIR}/session_report.txt"
@@ -42,10 +43,16 @@ if "${GEMINI_BIN}" --help 2>&1 | grep -q -- "--telemetry"; then
   )
 fi
 
+DEFAULT_ARGS=()
+if [[ -n "${GEMINI_DEFAULT_ARGS}" ]]; then
+  # shellcheck disable=SC2206
+  DEFAULT_ARGS=(${GEMINI_DEFAULT_ARGS})
+fi
+
 set +e
 (
   cd "${PROJECT_ROOT}"
-  "${GEMINI_BIN}" "${TELEMETRY_ARGS[@]}" "$@"
+  "${GEMINI_BIN}" "${TELEMETRY_ARGS[@]}" "${DEFAULT_ARGS[@]}" "$@"
 )
 EXIT_CODE=$?
 set -e

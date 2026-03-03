@@ -29,6 +29,7 @@ Files:
 Environment overrides:
 - `GEMINI_TIMING_LOG_DIR` to change log output root directory
 - `GEMINI_BIN` to use a non-default Gemini executable
+- `GEMINI_DEFAULT_ARGS` to set default Gemini CLI args (default: `--yolo`)
 
 ---
 
@@ -65,10 +66,24 @@ cd /<ABSOLUTE_PATH>/ros-mcp-server
 
 When each run starts:
 1. rosbag recording starts automatically.
-2. Gemini CLI opens automatically.
+2. Gemini CLI opens automatically (`--yolo` by default).
 3. You interact in Gemini, then exit Gemini.
 4. rosbag stops and artifacts are saved.
 5. Next run starts.
+
+Default Gemini args:
+- `--gemini-args "--yolo"`
+
+Override example:
+
+```bash
+./scripts/run_experiment_batch.sh \
+  --task T1-2 \
+  --condition C2 \
+  --env sim \
+  --repeats 20 \
+  --gemini-args "--yolo --model gemini-2.5-pro"
+```
 
 ### Resume usage
 
@@ -93,7 +108,8 @@ Completed runs are preserved and skipped.
   --condition P2 \
   --env real \
   --repeats 10 \
-  --from-run 4
+  --from-run 4 \
+  --gemini-args "--yolo"
 ```
 
 ### Output structure

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import shutil
 import signal
 import subprocess
@@ -163,6 +164,27 @@ class RunnerConfig:
     rosbag_warmup_sec: float
     rosbag_shutdown_sec: float
     continue_on_failure: bool
+    gemini_args: list[str]
+
+
+def call_interactive(cmd: list[str], *, cwd: Path, env: dict[str, str]) -> int:
+    """Run command with best-effort TTY binding for interactive CLI tools."""
+    try:
+        tty = open("/dev/tty", "r+", encoding="utf-8", errors="replace")
+    except OSError:
+        return subprocess.call(cmd, cwd=str(cwd), env=env)
+
+    try:
+        return subprocess.call(
+            cmd,
+            cwd=str(cwd),
+            env=env,
+            stdin=tty,
+            stdout=tty,
+            stderr=tty,
+        )
+    finally:
+        tty.close()
 
 
 def run_one(
@@ -263,7 +285,8 @@ def run_one(
             gemini_env = os.environ.copy()
             gemini_env["GEMINI_TIMING_LOG_DIR"] = str(gemini_raw_root)
             gemini_env["GEMINI_TIMING_SESSION_ID"] = session_id
-            gemini_exit_code = subprocess.call([str(wrapper_script)], cwd=str(cfg.workspace_root), env=gemini_env)
+            wrapper_cmd = [str(wrapper_script), *cfg.gemini_args]
+            gemini_exit_code = call_interactive(wrapper_cmd, cwd=cfg.workspace_root, env=gemini_env)
 
             rosbag_exit_code = stop_process_group(rosbag_proc, timeout_sec=cfg.rosbag_shutdown_sec)
 
@@ -430,6 +453,14 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Continue remaining runs even if one run fails",
     )
+    parser.add_argument(
+        "--gemini-args",
+        default="--yolo",
+        help=(
+            "Extra args forwarded to run_gemini_with_timing.sh (default: '--yolo'). "
+            "Example: \"--yolo --model gemini-2.5-pro\""
+        ),
+    )
     return parser.parse_args()
 
 
@@ -477,12 +508,14 @@ def main() -> int:
         rosbag_warmup_sec=float(args.rosbag_warmup_sec),
         rosbag_shutdown_sec=float(args.rosbag_shutdown_sec),
         continue_on_failure=bool(args.continue_on_failure),
+        gemini_args=shlex.split(str(args.gemini_args)),
     )
 
     manifest_path = output_root / args.task / args.condition / args.env / "manifest.jsonl"
     print(f"[batch] task={args.task} condition={args.condition} env={args.env} repeats={args.repeats}")
     print(f"[batch] output_root={output_root}")
     print(f"[batch] profile={profiles_path}")
+    print(f"[batch] gemini_args={cfg.gemini_args}")
 
     completed = 0
     failed = 0
