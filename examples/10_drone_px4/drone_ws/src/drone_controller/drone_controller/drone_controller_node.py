@@ -1,5 +1,26 @@
 import math
 import time
+from threading import Event
+
+class CancelToken:
+    def __init__(self) -> None:
+        self._event = Event()
+    def cancel(self) -> None:
+        self._event.set()
+    @property
+    def canceled(self) -> bool:
+        return self._event.is_set()
+    def sleep(self, seconds: float, poll_sec: float = 0.02) -> bool:
+        if self.canceled:
+            return False
+        deadline = time.monotonic() + max(0.0, float(seconds))
+        while not self.canceled:
+            remain = deadline - time.monotonic()
+            if remain <= 0.0:
+                return True
+            self._event.wait(timeout=min(max(1e-3, poll_sec), remain))
+        return False
+
 
 import rclpy
 from drone_interfaces.action import DroneTakeoff, DroneTrajectory
@@ -116,6 +137,7 @@ class DroneMCPBridge(Node):
         return True
 
     async def execute_takeoff(self, goal_handle):
+        token = CancelToken()
         self.get_logger().info(f"Executing Takeoff to {goal_handle.request.target_altitude}m")
 
         if not await self.prepare_for_flight():
@@ -131,6 +153,8 @@ class DroneMCPBridge(Node):
 
         while rclpy.ok():
             if goal_handle.is_cancel_requested:
+                token.cancel()
+            if token.canceled:
                 goal_handle.canceled()
                 return DroneTakeoff.Result(success=False, message="Canceled")
 
@@ -143,13 +167,14 @@ class DroneMCPBridge(Node):
             if error < 0.2:
                 break
 
-            time.sleep(0.5)
+            token.sleep(0.5)
 
         goal_handle.succeed()
         return DroneTakeoff.Result(success=True, message="Takeoff complete")
 
     async def execute_trajectory(self, goal_handle):
         req = goal_handle.request
+        token = CancelToken()
         self.get_logger().info(
             f"Executing Trajectory with {len(req.points)} points. FlyThrough={req.fly_through}"
         )
@@ -235,10 +260,10 @@ class DroneMCPBridge(Node):
                     if setpoint_reached and drone_dist_to_wp < tolerance:
                         break
 
-                time.sleep(dt)
+                token.sleep(dt)
 
             if not req.fly_through:
-                time.sleep(1.0)
+                token.sleep(1.0)
 
             current_global_idx += 1
 

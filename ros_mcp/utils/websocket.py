@@ -1,6 +1,7 @@
 import base64
 import json
 import os
+import socket
 import sys
 import threading
 from typing import Union
@@ -373,8 +374,13 @@ class WebSocketManager:
                     self.ws.settimeout(actual_timeout)
                     raw = self.ws.recv()  # rosbridge sends JSON as a string
                     return raw
+                except (socket.timeout, TimeoutError, websocket.WebSocketTimeoutException) as e:
+                    # Timeout is expected during polling loops (e.g., waiting action result).
+                    # Keep the connection open and let caller continue polling.
+                    print(f"[WebSocket] Receive timeout: {e}", file=sys.stderr)
+                    return None
                 except Exception as e:
-                    print(f"[WebSocket] Receive error or timeout: {e}", file=sys.stderr)
+                    print(f"[WebSocket] Receive error: {e}", file=sys.stderr)
                     self.close()
                     return None
             return None

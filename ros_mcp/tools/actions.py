@@ -621,14 +621,20 @@ def register_action_tools(
             while time.time() - start_time < timeout:
                 elapsed_time = time.time() - start_time
 
-                response = ws_manager.receive(timeout - elapsed_time)
+                response = ws_manager.receive(min(1.0, timeout - elapsed_time))
 
                 if response:
                     try:
                         msg_data = json.loads(response)
+                        msg_id = msg_data.get("id")
+                        if msg_id is not None and msg_id != goal_id:
+                            continue
 
                         # Handle action_result messages (final completion)
                         if msg_data.get("op") == "action_result":
+                            result_values = msg_data.get("values", {})
+                            if not isinstance(result_values, dict):
+                                result_values = {}
                             # Report completion
                             if ctx:
                                 try:
@@ -645,7 +651,7 @@ def register_action_tools(
                                 "success": True,
                                 "goal_id": goal_id,
                                 "status": msg_data.get("status", "unknown"),
-                                "result": msg_data.get("values", {}),
+                                "result": result_values,
                             }
 
                         # Store action_feedback messages and report progress
@@ -668,9 +674,7 @@ def register_action_tools(
                         continue
                 else:
                     # No response received, continue waiting
-                    pass
-
-                await asyncio.sleep(0.1)
+                    await asyncio.sleep(0.02)
 
             # Timeout - return last feedback if available
             if ctx and feedback_count > 0:
