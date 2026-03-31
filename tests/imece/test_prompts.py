@@ -74,3 +74,11 @@ def test_t3_prompt_includes_square_pattern_protocol():
     assert "Use exactly five `setpoint_relay` motion targets" in prompt
     assert "Keep the square axis-aligned in local ENU" in prompt
     assert "within about `0.2 m` in local `x/y` and `0.25 m` in `z`" in prompt
+
+
+def test_r2_prompt_reuses_translation_protocol():
+    prompt = build_episode_prompt("C2", "R2", 1, "127.0.0.1", 9090, selected_helpers=["setpoint_relay"])
+    assert "task_name: `Real Short Translation`" in prompt
+    assert "Take off, move one meter forward, hover, and land." in prompt
+    assert "Translation execution protocol:" in prompt
+    assert "Use exactly two motion targets" in prompt

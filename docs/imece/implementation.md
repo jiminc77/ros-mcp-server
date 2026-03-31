@@ -40,6 +40,29 @@ Official evaluation always starts a fresh Gemini session per episode. Discovery 
 
 The official control surface is restricted to ROS introspection, topic publish, topic subscribe, state read, and service call over a `local pose` flight interface plus mode and arming control.
 
+### Repository Map
+
+The IMECE work is split across a small number of directories. This is the intended map of the working tree:
+
+| Path | Role |
+| --- | --- |
+| [`docs/imece/implementation.md`](./implementation.md) | experiment specification and current source of truth |
+| [`docs/imece/design-rationale.md`](./design-rationale.md) | why the staged `C0 -> C1 -> C2` design exists |
+| [`docs/imece/experiment-record.md`](./experiment-record.md) | preserved experiment history, prompt/task evolution, and paper-facing evidence summary |
+| [`docs/imece/runbook.md`](./runbook.md) | how to run the simulation study and inspect outputs |
+| [`config/imece/`](../../config/imece/) | condition artifacts, Gemini policy, and frozen `C2` helper selection |
+| [`ros_mcp/imece/`](../../ros_mcp/imece/) | IMECE runtime code: prompt builder, runner, helper layer, monitoring, and analysis |
+| [`scripts/imece/`](../../scripts/imece/) | simulator bring-up, shutdown, and Gemini MCP setup helpers |
+| [`tests/imece/`](../../tests/imece/) | automated tests for the IMECE runner, prompts, helpers, and analysis |
+| [`artifacts/imece/`](../../artifacts/imece/) | batch outputs such as prompts, traces, metrics, metadata, and analysis summaries |
+
+When you need to answer “where is X?”, the usual rule is:
+
+- experiment rules and intended methodology: `docs/imece/`
+- machine-readable prompt and freeze artifacts: `config/imece/`
+- executable implementation: `ros_mcp/imece/`
+- generated run evidence: `artifacts/imece/`
+
 ### Control Surface Boundary
 
 The study does not expose the full ROS graph to the agent. It exposes an IMECE-scoped subset of ros-mcp that is sufficient for the target tasks but intentionally excludes higher-level or off-scope interfaces.
@@ -256,6 +279,16 @@ Promote only the lowest-support condition that satisfies all of the following:
 - repetitions: `5` per task
 - environment: indoor mocap
 
+### Current Automation Status
+
+- `discovery`, `c2_freeze`, and `official_sim` are automated by the current runner
+- `official_real` is not automated as a batch phase in `run-phase`
+- a single-episode real-flight scaffold is available through `run-real-episode`
+- this is intentional: real-flight batching is not required for the current study stage
+- the current real-flight automation boundary is therefore:
+  - automate prompt construction, Gemini session execution, logging, and metrics capture
+  - keep operator go/no-go, airspace confirmation, and takeover readiness manual
+
 ## 8. Metrics and Metadata
 
 ### Primary Metrics
@@ -323,3 +356,27 @@ Promote only the lowest-support condition that satisfies all of the following:
   - horizontal translation: `1.0 m`
   - hover duration: `5 s`
 - actual geofence and ceiling values are execution-machine environment facts and must be measured and written into the run configuration before real-flight trials
+
+### Real-flight Outputs to Preserve
+
+Even before `official_real` is automated, the intended real-flight outputs are already fixed:
+
+- primary outcomes:
+  - task success
+  - operator-intervention-free success
+  - completion time
+- safety outcomes:
+  - timeout
+  - watchdog-triggered land
+  - operator takeover or abort
+  - `OFFBOARD` rejection or drop
+- motion outcomes:
+  - altitude reached for `R1`
+  - hover duration achieved for `R1`
+  - translation error for `R2`
+- environment and provenance:
+  - repo commit
+  - routed model
+  - PX4, MAVROS, Gazebo, and ros-mcp revisions
+  - actual geofence and ceiling values
+  - mocap-space note for the run

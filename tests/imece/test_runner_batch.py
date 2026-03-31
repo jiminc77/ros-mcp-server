@@ -247,6 +247,40 @@ def test_vehicle_ready_requires_connected_pose_and_system_status():
     assert runner._vehicle_ready({**healthy, "mode": runner.OFFBOARD_MODE}) is False
     assert runner._vehicle_ready({**healthy, "orientation_x": 0.7, "orientation_y": 0.0}) is False
 
+
+def test_ensure_real_episode_ready_rejects_unhealthy_baseline(monkeypatch):
+    monkeypatch.setattr(
+        runner,
+        "_sample_vehicle_state",
+        lambda **_: {
+            "connected": True,
+            "armed": True,
+            "mode": "OFFBOARD",
+            "z": 1.0,
+            "system_status": 4,
+            "orientation_x": 0.0,
+            "orientation_y": 0.0,
+        },
+    )
+
+    try:
+        runner._ensure_real_episode_ready(host="127.0.0.1", port=9090, progress_enabled=False)
+    except RuntimeError as exc:
+        assert "real-flight preflight check failed" in str(exc)
+    else:
+        raise AssertionError("expected real-flight preflight failure")
+
+
+def test_parser_accepts_run_real_episode_command():
+    parser = runner.build_parser()
+    args = parser.parse_args(
+        ["run-real-episode", "--condition", "C2", "--task", "R1", "--episode-index", "1"]
+    )
+    assert args.command == "run-real-episode"
+    assert args.condition == "C2"
+    assert args.task == "R1"
+    assert args.episode_index == 1
+
 def test_ensure_episode_stack_ready_restarts_on_unhealthy_baseline(monkeypatch, tmp_path):
     snapshots = iter(
         [

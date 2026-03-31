@@ -56,6 +56,7 @@ def test_task_success_accepts_safe_disarmed_landing_without_land_mode():
         "latest_armed": False,
     }
     assert _task_success("T1", report) is True
+    assert _task_success("R1", report) is True
 
 
 def test_task_success_t4_stop_there_accepts_safe_halfway_landing():
@@ -95,6 +96,16 @@ def test_task_success_t3_accepts_square_return_and_landing():
         "square_pattern_complete": True,
     }
     assert _task_success("T3", report) is True
+
+
+def test_task_success_r2_accepts_safe_translation_and_landing():
+    report = {
+        "max_altitude_m": 1.0,
+        "final_position": {"z": 0.0},
+        "latest_armed": False,
+        "horizontal_displacement_m": 1.05,
+    }
+    assert _task_success("R2", report) is True
 
 
 def test_resolve_t4_interrupt_alternates_stop_and_land():

@@ -477,6 +477,21 @@ def _ensure_episode_stack_ready(
         raise RuntimeError(f"sim stack did not reach a ready state: {ready_snapshot}")
 
 
+def _ensure_real_episode_ready(
+    *,
+    host: str,
+    port: int,
+    progress_enabled: bool,
+) -> None:
+    snapshot = _sample_vehicle_state(host=host, port=port, timeout_s=15.0)
+    if not _vehicle_ready(snapshot):
+        raise RuntimeError(
+            "real-flight preflight check failed; expected connected, landed, disarmed, "
+            f"upright baseline but saw {snapshot}"
+        )
+    _log(progress_enabled, f"[episode] real preflight ready state={snapshot}")
+
+
 def _normalize_episode_start_state(
     requester: RosbridgeRequester,
     *,
@@ -637,9 +652,9 @@ def _task_success(task_id: str, report: dict[str, Any]) -> bool:
     interrupt_prompt = report.get("interrupt_prompt")
     safe_landed = final_z <= 0.2 and latest_armed is False
 
-    if task_id == "T1":
+    if task_id in {"T1", "R1"}:
         return max_altitude >= 0.8 and safe_landed
-    if task_id == "T2":
+    if task_id in {"T2", "R2"}:
         return (
             max_altitude >= 0.8
             and horizontal is not None
@@ -667,17 +682,12 @@ def _task_success(task_id: str, report: dict[str, Any]) -> bool:
     return False
 
 
-def run_episode(args: argparse.Namespace) -> Path:
+def _run_configured_episode(args: argparse.Namespace, *, execution_mode: str) -> Path:
     task_spec = resolve_task_spec(args.task)
     batch_root = Path(args.output_root)
     batch_id = args.batch_id or _now_stamp()
-    episode_dir = (
-        batch_root
-        / batch_id
-        / args.condition.upper()
-        / task_spec.task_id
-        / f"episode-{args.episode_index:02d}"
-    )
+    condition_label = args.condition.upper()
+    episode_dir = batch_root / batch_id / condition_label / task_spec.task_id / f"episode-{args.episode_index:02d}"
     if getattr(args, "clean_existing", False) and episode_dir.exists():
         shutil.rmtree(episode_dir)
     episode_dir.mkdir(parents=True, exist_ok=True)
@@ -686,13 +696,13 @@ def run_episode(args: argparse.Namespace) -> Path:
     if progress_enabled and not from_batch:
         _log(
             True,
-            f"[episode] start {args.condition.upper()}:{task_spec.task_id}:{args.episode_index:02d} batch_id={batch_id}",
+            f"[episode] start {condition_label}:{task_spec.task_id}:{args.episode_index:02d} batch_id={batch_id}",
         )
 
     rosbridge_ip = args.rosbridge_ip
     rosbridge_port = args.rosbridge_port
     freeze = load_c2_freeze(Path(args.freeze_path))
-    selected_helpers = freeze.get("selected_helpers", []) if args.condition.upper() == "C2" else []
+    selected_helpers = freeze.get("selected_helpers", []) if condition_label == "C2" else []
     helper_env_value = ",".join(selected_helpers)
 
     heartbeat_path = episode_dir / "watchdog.heartbeat"
@@ -707,7 +717,7 @@ def run_episode(args: argparse.Namespace) -> Path:
 
     policy_path = Path(args.policy_path)
     prompt = build_episode_prompt(
-        args.condition,
+        condition_label,
         task_spec.task_id,
         args.episode_index,
         rosbridge_ip,
@@ -716,14 +726,23 @@ def run_episode(args: argparse.Namespace) -> Path:
     )
     (episode_dir / "prompt.txt").write_text(prompt + "\n", encoding="utf-8")
 
-    _ensure_episode_stack_ready(
-        cwd=Path(args.cwd),
-        host=rosbridge_ip,
-        port=rosbridge_port,
-        progress_enabled=progress_enabled,
-    )
     ros_requester = RosbridgeRequester(rosbridge_ip, rosbridge_port, timeout=5.0)
-    _normalize_episode_start_state(ros_requester, host=rosbridge_ip, port=rosbridge_port)
+    if execution_mode == "sim":
+        _ensure_episode_stack_ready(
+            cwd=Path(args.cwd),
+            host=rosbridge_ip,
+            port=rosbridge_port,
+            progress_enabled=progress_enabled,
+        )
+        _normalize_episode_start_state(ros_requester, host=rosbridge_ip, port=rosbridge_port)
+    elif execution_mode == "real":
+        _ensure_real_episode_ready(
+            host=rosbridge_ip,
+            port=rosbridge_port,
+            progress_enabled=progress_enabled,
+        )
+    else:
+        raise ValueError(f"Unsupported execution mode: {execution_mode}")
     monitor = FlightMonitor(rosbridge_ip, rosbridge_port, episode_dir / "monitor.jsonl")
     monitor.start()
     rosbag_process = _start_rosbag(episode_dir / "rosbag")
@@ -833,9 +852,10 @@ def run_episode(args: argparse.Namespace) -> Path:
                 )
         metrics = {
             "batch_id": batch_id,
-            "condition": args.condition.upper(),
+            "condition": condition_label,
             "task_id": task_spec.task_id,
             "task_name": task_spec.title,
+            "execution_mode": execution_mode,
             "episode_index": args.episode_index,
             "session_id": resume_session_id,
             "terminal_label": terminal_label,
@@ -874,9 +894,10 @@ def run_episode(args: argparse.Namespace) -> Path:
         _write_json(
             episode_dir / "metadata.json",
             {
-                "condition": args.condition.upper(),
+                "condition": condition_label,
                 "task_id": task_spec.task_id,
                 "task_name": task_spec.title,
+                "execution_mode": execution_mode,
                 "selected_helpers": selected_helpers,
                 "turns": turns,
             },
@@ -887,20 +908,34 @@ def run_episode(args: argparse.Namespace) -> Path:
             _log(
                 True,
                 (
-                    f"[episode] end {args.condition.upper()}:{task_spec.task_id}:{args.episode_index:02d} "
+                    f"[episode] end {condition_label}:{task_spec.task_id}:{args.episode_index:02d} "
                     f"task_success={metrics['task_success']} infra_error={metrics['infra_error']} "
                     f"failures={failure_codes}"
                 ),
             )
     finally:
-        try:
-            _normalize_episode_start_state(ros_requester, host=rosbridge_ip, port=rosbridge_port, timeout_s=6.0)
-        except Exception:
-            pass
+        if execution_mode == "sim":
+            try:
+                _normalize_episode_start_state(
+                    ros_requester,
+                    host=rosbridge_ip,
+                    port=rosbridge_port,
+                    timeout_s=6.0,
+                )
+            except Exception:
+                pass
         _stop_process(rosbag_process)
         monitor.stop()
         ros_requester.close()
     return episode_dir
+
+
+def run_episode(args: argparse.Namespace) -> Path:
+    return _run_configured_episode(args, execution_mode="sim")
+
+
+def run_real_episode(args: argparse.Namespace) -> Path:
+    return _run_configured_episode(args, execution_mode="real")
 
 
 def _execute_batch_specs(
@@ -1081,6 +1116,12 @@ def build_parser() -> argparse.ArgumentParser:
     episode.add_argument("--task", choices=["T1", "T2", "T3", "T4"], required=True)
     episode.add_argument("--episode-index", type=int, required=True)
 
+    real_episode = subparsers.add_parser("run-real-episode")
+    add_shared(real_episode)
+    real_episode.add_argument("--condition", choices=["C0", "C1", "C2"], required=True)
+    real_episode.add_argument("--task", choices=["R1", "R2"], required=True)
+    real_episode.add_argument("--episode-index", type=int, required=True)
+
     batch = subparsers.add_parser("run-batch")
     add_shared(batch)
     batch.add_argument("--conditions", nargs="+", default=["C0", "C1"])
@@ -1122,6 +1163,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.command == "run-episode":
         run_episode(args)
+    elif args.command == "run-real-episode":
+        run_real_episode(args)
     elif args.command == "run-batch":
         run_batch(args)
     elif args.command == "run-phase":

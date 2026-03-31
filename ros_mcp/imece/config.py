@@ -49,6 +49,18 @@ TASK_SPECS = {
         canonical_prompt="Take off and move forward one meter.",
         clarification_reply="Use local ENU with forward as +x and move one meter unless I interrupt with a correction.",
     ),
+    "R1": TaskSpec(
+        task_id="R1",
+        title="Real Takeoff Hover Land",
+        canonical_prompt="Take off to one meter, hover for five seconds, then land.",
+        clarification_reply="Use the current local pose as the start, go to about one meter altitude, hover five seconds, then land.",
+    ),
+    "R2": TaskSpec(
+        task_id="R2",
+        title="Real Short Translation",
+        canonical_prompt="Take off, move one meter forward, hover, and land.",
+        clarification_reply="Use local ENU with forward as +x, move one meter at about one meter altitude, hover briefly, then land.",
+    ),
 }
 
 T4_INTERRUPT_PROMPTS = ("Stop there.", "Land now.")
@@ -136,14 +148,14 @@ def _helper_block(selected_helpers: list[str]) -> str:
 
 
 def _task_specific_block(task_id: str) -> str:
-    if task_id == "T2":
+    if task_id in {"T2", "R2"}:
         return textwrap.dedent(
             """
-            T2 execution protocol:
+            Translation execution protocol:
             - Use exactly two motion targets: a takeoff hold near one meter altitude, then a one-meter-forward hold at the same altitude.
             - Do not retarget for the forward motion until the current pose is near the takeoff hold.
             - Do not call `mode_guard(action='engage_offboard')` again after it succeeds unless the helper returns an explicit `error`.
-            - The simulator is already ready; do not idle for extra sensor or system initialization.
+            - The platform is already ready; do not idle for extra sensor or system initialization.
             """
         ).strip()
     if task_id == "T3":

@@ -89,6 +89,25 @@ This prints the official episode counts from the experiment specification, inclu
 - official real-flight: `10`
 - fixed total with one `C2` freeze batch: `190`
 
+## Run one real-flight episode
+
+```bash
+uv run python -m ros_mcp.imece.runner run-real-episode \
+  --condition C2 \
+  --task R1 \
+  --episode-index 1 \
+  --batch-id official-real-r1-001
+```
+
+Use the promoted condition for `--condition`. This scaffold:
+
+- builds the same full first-turn prompt used in simulation
+- runs Gemini CLI non-interactively in a fresh headless session
+- records `prompt.txt`, `gemini.jsonl`, `monitor.jsonl`, `metadata.json`, and `metrics.json`
+- checks for a connected, landed, disarmed, upright preflight baseline before starting
+
+It does not batch multiple real flights and does not replace operator go/no-go judgment.
+
 ## Retry and resume behavior
 
 - `run-batch` and `run-phase` write `batch_state.json`
