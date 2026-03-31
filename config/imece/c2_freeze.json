@@ -1,17 +1,21 @@
 {
   "counts": {
-    "F2": 2,
-    "F4": 2,
-    "F5": 2
+    "F1": 2,
+    "F2": 15,
+    "F3": 3,
+    "F4": 14,
+    "F5": 12
   },
   "reasoning": [
-    "setpoint_relay enabled after 2 post-C1 streaming/timing failures",
-    "mode_guard enabled after 2 post-C1 mode-transition failures",
+    "setpoint_relay enabled after 14 post-C1 streaming/timing failures",
+    "mode_guard enabled after 13 post-C1 mode-transition failures",
+    "frame_guard enabled after 3 post-C1 frame/sign failures",
     "abort_watchdog enabled after at least one post-C1 unsafe timeout/abort event"
   ],
   "selected_helpers": [
     "setpoint_relay",
     "mode_guard",
+    "frame_guard",
     "abort_watchdog"
   ],
   "source": "discovery_batch_analysis",

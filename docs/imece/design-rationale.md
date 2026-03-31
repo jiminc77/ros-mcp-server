@@ -44,28 +44,34 @@ The purpose of `C1` is therefore not “best possible prompt engineering.” It 
 
 ## 4. Discovery evidence that motivated C2
 
-The live discovery artifacts are under `artifacts/imece/live-discovery-v2/`.
+The completed discovery batch is under `artifacts/imece/discovery-20260331/`.
+
+That batch contains:
+
+- `40` completed discovery episodes
+- `0` infrastructure failures
+- the full discovery matrix: `C0`, `C1` x `T1-T4` x `5` repetitions
 
 Representative failures:
 
 - `C0/T1/episode-01/metrics.json`
-  - `failure_codes = ["F4", "F5"]`
-  - `max_setpoint_gap_s = 23.80`
-  - `offboard_rejection_count = 2`
+  - `failure_codes = ["F2", "F4", "F5"]`
+  - `max_setpoint_gap_s = 25.00`
+  - `offboard_rejection_count = 4`
   - `timed_out = true`
   - `watchdog_triggered = true`
 - `C1/T1/episode-01/metrics.json`
   - `failure_codes = ["F2", "F4", "F5"]`
-  - `invalid_tool_call_count = 3`
-  - `setpoint_count = 2`
-  - `max_altitude_m = 0.0278`
+  - `invalid_tool_call_count = 4`
+  - `setpoint_count = 60`
+  - `max_altitude_m = 1.9835`
   - `timed_out = true`
 - `C1/T1/episode-02/metrics.json`
-  - `failure_codes = ["F2", "F4", "F5"]`
+  - `failure_codes = ["F2", "F3", "F4"]`
   - `invalid_tool_call_count = 2`
-  - `setpoint_count = 2`
-  - `offboard_rejection_count = 1`
-  - `timed_out = true`
+  - `setpoint_count = 4`
+  - `offboard_rejection_count = 2`
+  - `max_altitude_m = 0.0291`
 
 The critical qualitative observation from the `C1` logs was:
 
@@ -90,8 +96,8 @@ The helper freeze output is stored in [`config/imece/c2_freeze.json`](../../conf
 
 - repeated `F4` after `C1` selected `setpoint_relay`
 - repeated `F4` mode-transition failures selected `mode_guard`
+- repeated `F3` after `C1` selected `frame_guard`
 - at least one unsafe timeout/abort selected `abort_watchdog`
-- no repeated `F3` evidence meant `frame_guard` was not frozen into the selected subset
 
 This is important for the paper narrative. The chosen subset is not a convenience bundle. Each helper is tied to a repeated failure class:
 
@@ -101,15 +107,14 @@ This is important for the paper narrative. The chosen subset is not a convenienc
 - `mode_guard`
   - repairs ordering failures around `prestream -> OFFBOARD -> arm`
   - exposes only guarded offboard engage and land
+- `frame_guard`
+  - repairs repeated frame/sign mistakes seen in discovery
+  - rejects body/NED-like frame IDs and negative local ENU altitude targets
 - `abort_watchdog`
   - repairs timeout and abort safety gaps
   - forces `LAND` when the runner heartbeat stops or an abort flag is raised
 
-The omitted helper is equally important:
-
-- `frame_guard` stayed out of the frozen subset because repeated discovery evidence for `F3` did not materialize
-
-This omission supports the “minimal intervention” claim.
+Minimality still matters here. The discovery batch froze only the helpers backed by repeated post-`C1` evidence. No extra semantic takeoff, goto, or mission-level abstraction was added.
 
 ## 6. Why C2 prompt text is separated into callable tools and runtime safeguards
 
@@ -121,29 +126,22 @@ The `C2` prompt builder in `ros_mcp/imece/config.py` separates:
 This matters because:
 
 - `setpoint_relay` and `mode_guard` are tools the agent can call
-- `abort_watchdog` is active runtime behavior, not a callable primitive
+- `frame_guard` and `abort_watchdog` are active runtime behavior, not callable primitives
 
 Without that separation, the prompt would incorrectly suggest that all selected helpers are agent-facing tools, which would blur the experiment boundary.
 
-## 7. Evidence that C2 can repair the specific failure mode
+## 7. What discovery justifies, and what comes next
 
-The successful smoke artifact is `artifacts/imece/c2-smoke-v2/C2/T1/episode-01/`.
+`discovery-20260331` justifies the frozen `C2` subset. It does not by itself replace the dedicated `C2` confirmation stage.
 
-In that run:
+The next preserved artifact should therefore be the `c2_freeze` validation batch that runs with this exact frozen subset:
 
-- the agent used `setpoint_relay` to establish a persistent local pose target
-- `mode_guard` waited for `prestream_publishes = 21` before engaging `OFFBOARD` and arming
-- the final metrics recorded:
-  - `task_success = true`
-  - `failure_codes = []`
-  - `max_altitude_m = 1.022`
-  - `max_setpoint_gap_s = 0.101`
-  - `invalid_tool_call_count = 0`
+- `setpoint_relay`
+- `mode_guard`
+- `frame_guard`
+- `abort_watchdog`
 
-That is exactly the intended claim for `C2`:
-
-- it is not a semantic mission API
-- it is the smallest low-level repair that closes the specific gap left by `C1`
+That next stage is where the paper should claim that `C2` repairs the specific low-level gap left by `C1`.
 
 ## 8. Experiment counts from the specification
 

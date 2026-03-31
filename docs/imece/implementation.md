@@ -40,6 +40,25 @@ Official evaluation always starts a fresh Gemini session per episode. Discovery 
 
 The official control surface is restricted to ROS introspection, topic publish, topic subscribe, state read, and service call over a `local pose` flight interface plus mode and arming control.
 
+### Control Surface Boundary
+
+The study does not expose the full ROS graph to the agent. It exposes an IMECE-scoped subset of ros-mcp that is sufficient for the target tasks but intentionally excludes higher-level or off-scope interfaces.
+
+| Category | Allowed surface | Excluded surface | Boundary reason |
+| --- | --- | --- | --- |
+| State observation | `/mavros/state`, `/mavros/local_position/pose`, `/mavros/battery` | arbitrary ROS topics, node graph, parameters | enough state for task completion, safety checks, and post-hoc scoring |
+| Control output | `/mavros/setpoint_position/local` | velocity control, body-frame control, mission topics, arbitrary publish targets | fixes the study on local-pose control so frame and timing failures remain observable |
+| Services | `/mavros/set_mode`, `/mavros/cmd/arming` | `/mavros/cmd/takeoff`, `/mavros/cmd/land`, and other MAVROS services | removes semantic shortcuts and preserves the need to reason about mode ordering and arming |
+| Generic tool families | topic and service introspection, subscribe, publish, call | actions, nodes, parameters, robot spec tools, image tools | removes unrelated surface area that would weaken attribution of failures |
+
+The boundary was chosen to preserve three properties:
+
+- task sufficiency: the agent can still complete `T1-T4` using ROS-level primitives only
+- non-semantic control: the agent cannot collapse the task into high-level flight calls such as `takeoff()`, `goto()`, or mission executors
+- failure interpretability: errors remain attributable to prompt reasoning, message construction, frame handling, or offboard timing rather than to hidden controller abstractions
+
+This boundary is shared by `C0` and `C1`. `C2` keeps the same generic boundary and adds only a frozen helper subset justified by repeated discovery failures.
+
 ## 3. Condition Design
 
 | Condition | Tool surface | Prompt context | Helper layer | Purpose |

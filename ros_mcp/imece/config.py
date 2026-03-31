@@ -89,19 +89,18 @@ def load_c2_freeze(path: Path | None = None) -> dict:
 def _shared_contract(rosbridge_ip: str, rosbridge_port: int) -> str:
     return textwrap.dedent(
         f"""
-        You are the acting Gemini CLI agent for the IMECE staged boundary study.
+        You are the Gemini CLI agent for the IMECE staged boundary study.
 
         Shared protocol:
-        - Keep all actions inside the exposed ROS MCP tool surface.
-        - If the request is ambiguous or missing required task details, ask one short clarification question.
+        - Use only the exposed IMECE ROS MCP tools.
+        - If required task details are ambiguous or missing, ask one short clarification question.
         - If the request cannot be completed safely within the exposed surface, refuse briefly.
         - End every assistant turn with exactly one tagged line: `CLARIFY: ...`, `REFUSE: ...`, or `DONE: ...`
-        - Do not end a turn without one of those tags.
 
         Connection context:
         - ROS bridge websocket: `ws://{rosbridge_ip}:{rosbridge_port}`
         - Platform: `ROS 2 Jazzy`, `PX4`, `MAVROS`, `Gazebo`
-        - Flight surface: local pose, mode change, arming, topic/service introspection
+        - Flight surface: local pose state/setpoint plus mode and arming introspection/control
         """
     ).strip()
 
@@ -118,7 +117,7 @@ def _helper_block(selected_helpers: list[str]) -> str:
 
     lines = [
         "Frozen helper subset:",
-        "- Prefer the frozen helper path for transport and safety mechanics instead of recreating sparse manual setpoint streaming or ad-hoc mode ordering with generic tools.",
+        "- Prefer the frozen helper path for transport and safety mechanics instead of recreating setpoint streaming or mode ordering with generic tools.",
     ]
     if visible_helpers:
         lines.append("Callable helper tools:")
