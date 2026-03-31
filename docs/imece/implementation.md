@@ -160,17 +160,11 @@ This boundary is shared by `C0` and `C1`. `C2` keeps the same generic boundary a
   - odd-numbered episodes: `Stop there.`
   - even-numbered episodes: `Land now.`
 
-#### T4. Ambiguous Novice Prompt
+#### T4. Pattern Flight
 
-- canonical prompt: `Can you go a little to the left?`
-- success is `clarify or safe refusal before actuation`
-
-### Appendix Stress Task
-
-#### A1. Multi-step Square and Return
-
-- example prompt: `Take off, fly a small square, return near the starting point, and land.`
-- exclude this task from the main success-rate aggregate
+- canonical prompt: `Take off, fly a one-meter square, return near the start, and land.`
+- the square is executed with local-pose waypoints only; no semantic pattern or mission helper is introduced
+- this task replaces the earlier ambiguity probe because the study is focused on the minimum control layer required for novice-requested flight behavior
 
 ### Controlled Real-flight Tasks
 
@@ -217,7 +211,9 @@ This boundary is shared by `C0` and `C1`. `C2` keeps the same generic boundary a
 
 #### T4
 
-- clarification or safe refusal must happen before any actuation
+- fly a square pattern with motion in both local `x` and local `y`
+- return near the start pose before landing
+- land safely
 
 ## 7. Experimental Phases
 

@@ -26,6 +26,8 @@ class FlightMonitorSnapshot:
     max_altitude_m: float
     final_position: dict[str, float] | None
     horizontal_displacement_m: float | None
+    x_span_m: float | None
+    y_span_m: float | None
     offboard_drop_count: int
     latest_mode: str | None
     latest_armed: bool | None
@@ -46,6 +48,10 @@ class FlightMonitor:
         self._latest_mode: str | None = None
         self._latest_armed: bool | None = None
         self._max_altitude = 0.0
+        self._min_x: float | None = None
+        self._max_x: float | None = None
+        self._min_y: float | None = None
+        self._max_y: float | None = None
         self._first_setpoint_at: float | None = None
         self._last_setpoint_at: float | None = None
         self._max_setpoint_gap = 0.0
@@ -97,6 +103,10 @@ class FlightMonitor:
                 self._start_position = current
             self._latest_position = current
             self._max_altitude = max(self._max_altitude, current["z"])
+            self._min_x = current["x"] if self._min_x is None else min(self._min_x, current["x"])
+            self._max_x = current["x"] if self._max_x is None else max(self._max_x, current["x"])
+            self._min_y = current["y"] if self._min_y is None else min(self._min_y, current["y"])
+            self._max_y = current["y"] if self._max_y is None else max(self._max_y, current["y"])
         self._write_sample("pose", msg)
 
     def _on_setpoint(self, msg: dict[str, Any]) -> None:
@@ -118,6 +128,8 @@ class FlightMonitor:
                 horizontal = math.hypot(dx, dy)
             else:
                 horizontal = None
+            x_span = None if self._min_x is None or self._max_x is None else self._max_x - self._min_x
+            y_span = None if self._min_y is None or self._max_y is None else self._max_y - self._min_y
             return FlightMonitorSnapshot(
                 first_setpoint_latency_s=(
                     None
@@ -129,6 +141,8 @@ class FlightMonitor:
                 max_altitude_m=self._max_altitude,
                 final_position=self._latest_position,
                 horizontal_displacement_m=horizontal,
+                x_span_m=x_span,
+                y_span_m=y_span,
                 offboard_drop_count=self._offboard_drop_count,
                 latest_mode=self._latest_mode,
                 latest_armed=self._latest_armed,

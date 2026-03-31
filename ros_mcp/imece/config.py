@@ -21,7 +21,6 @@ class TaskSpec:
     task_id: str
     canonical_prompt: str
     clarification_reply: str | None = None
-    stop_after_clarify: bool = False
 
 
 TASK_SPECS = {
@@ -42,8 +41,8 @@ TASK_SPECS = {
     ),
     "T4": TaskSpec(
         task_id="T4",
-        canonical_prompt="Can you go a little to the left?",
-        stop_after_clarify=True,
+        canonical_prompt="Take off, fly a one-meter square, return near the start, and land.",
+        clarification_reply="Use local ENU at about one meter altitude, fly a square with one-meter sides, return near the start pose, then land.",
     ),
 }
 
@@ -139,6 +138,16 @@ def _task_specific_block(task_id: str) -> str:
             - Do not retarget for the forward motion until the current pose is near the takeoff hold.
             - Do not call `mode_guard(action='engage_offboard')` again after it succeeds unless the helper returns an explicit `error`.
             - The simulator is already ready; do not idle for extra sensor or system initialization.
+            """
+        ).strip()
+    if task_id == "T4":
+        return textwrap.dedent(
+            """
+            T4 execution protocol:
+            - Use exactly five motion targets: a takeoff hold near one meter altitude, then the three new square corners, then a return-to-start hold at the same altitude.
+            - Keep the square axis-aligned in local ENU using one-meter sides.
+            - Verify only briefly at each corner; do not add extra pattern segments or loiter loops.
+            - Land after returning near the start pose.
             """
         ).strip()
     if task_id != "T3":

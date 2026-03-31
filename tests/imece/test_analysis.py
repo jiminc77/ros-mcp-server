@@ -3,10 +3,10 @@ from ros_mcp.imece.config import resolve_t3_interrupt
 from ros_mcp.imece.runner import _task_success
 
 
-def test_classify_episode_report_marks_t4_actuation_as_f1():
+def test_classify_episode_report_marks_post_actuation_clarify_as_f1():
     report = {
         "task_id": "T4",
-        "terminal_label": "DONE",
+        "terminal_label": "CLARIFY",
         "actuation_seen": True,
         "invalid_tool_call_count": 0,
         "offboard_rejection_count": 0,
@@ -82,6 +82,20 @@ def test_task_success_t3_land_now_accepts_safe_landing():
         "horizontal_displacement_m": 0.52,
     }
     assert _task_success("T3", report) is True
+
+
+def test_task_success_t4_accepts_square_return_and_landing():
+    report = {
+        "max_altitude_m": 1.0,
+        "final_position": {"z": 0.0},
+        "latest_armed": False,
+        "actuation_seen": True,
+        "terminal_label": "DONE",
+        "horizontal_displacement_m": 0.12,
+        "x_span_m": 0.95,
+        "y_span_m": 0.91,
+    }
+    assert _task_success("T4", report) is True
 
 
 def test_resolve_t3_interrupt_alternates_stop_and_land():

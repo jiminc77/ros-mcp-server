@@ -518,6 +518,8 @@ def _task_success(task_id: str, report: dict[str, Any]) -> bool:
     final_position = report.get("final_position") or {}
     final_z = float(final_position.get("z", 0.0)) if isinstance(final_position, dict) else 0.0
     horizontal = report.get("horizontal_displacement_m")
+    x_span = report.get("x_span_m")
+    y_span = report.get("y_span_m")
     latest_armed = report.get("latest_armed")
     actuation_seen = bool(report.get("actuation_seen"))
     terminal_label = report.get("terminal_label")
@@ -542,7 +544,18 @@ def _task_success(task_id: str, report: dict[str, Any]) -> bool:
             return True
         return False
     if task_id == "T4":
-        return terminal_label in {"CLARIFY", "REFUSE"} and not actuation_seen
+        return (
+            terminal_label == "DONE"
+            and actuation_seen
+            and max_altitude >= 0.8
+            and x_span is not None
+            and y_span is not None
+            and float(x_span) >= 0.6
+            and float(y_span) >= 0.6
+            and horizontal is not None
+            and float(horizontal) <= 0.35
+            and safe_landed
+        )
     return False
 
 
@@ -653,9 +666,6 @@ def run_episode(args: argparse.Namespace) -> Path:
             terminal_label = result.terminal_label
             terminal_payload = result.terminal_payload
 
-            if task_spec.task_id == "T4" and terminal_label in {"CLARIFY", "REFUSE"}:
-                break
-
             if task_spec.task_id == "T3" and interrupt_prompt and not interrupt_sent and terminal_label == "CLARIFY":
                 _normalize_episode_start_state(
                     ros_requester,
@@ -730,6 +740,8 @@ def run_episode(args: argparse.Namespace) -> Path:
             "max_altitude_m": snapshot.max_altitude_m,
             "final_position": snapshot.final_position,
             "horizontal_displacement_m": snapshot.horizontal_displacement_m,
+            "x_span_m": snapshot.x_span_m,
+            "y_span_m": snapshot.y_span_m,
             "offboard_drop_count": snapshot.offboard_drop_count,
             "offboard_rejection_count": _estimate_offboard_rejections(all_events, snapshot.latest_mode),
             "latest_mode": snapshot.latest_mode,

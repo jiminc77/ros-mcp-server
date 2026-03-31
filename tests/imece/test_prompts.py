@@ -64,3 +64,10 @@ def test_t2_prompt_includes_two_stage_motion_protocol():
     prompt = build_episode_prompt("C2", "T2", 1, "127.0.0.1", 9090, selected_helpers=["setpoint_relay"])
     assert "Use exactly two motion targets" in prompt
     assert "Do not retarget for the forward motion until the current pose is near the takeoff hold" in prompt
+
+
+def test_t4_prompt_includes_square_pattern_protocol():
+    prompt = build_episode_prompt("C2", "T4", 1, "127.0.0.1", 9090, selected_helpers=["setpoint_relay"])
+    assert "fly a one-meter square" in prompt
+    assert "Use exactly five motion targets" in prompt
+    assert "Keep the square axis-aligned in local ENU" in prompt
