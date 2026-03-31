@@ -52,6 +52,21 @@ def test_pose_relay_returns_soft_error_for_empty_target():
     assert result["error"] == "target.pose.position.{x,y,z} must be present and numeric"
 
 
+def test_pose_relay_accepts_quoted_mapping_keys():
+    relay = PoseRelay(_FakeRequester())
+
+    normalized = relay._normalize_target(
+        {
+            '"pose"': {
+                '"position"': {'"x"': -0.04, '"y"': 0.03, '"z"': 1.0},
+                '"orientation"': {'"x"': 0.0, '"y"': 0.0, '"z"': 0.0, '"w"': 1.0},
+            }
+        }
+    )
+
+    assert normalized["pose"]["position"] == {"x": -0.04, "y": 0.03, "z": 1.0}
+
+
 def test_mode_guard_land_waits_for_safe_landing(monkeypatch):
     class FakeSubscriber:
         def __init__(self, host: str, port: int, timeout: float = 1.0) -> None:

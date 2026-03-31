@@ -92,8 +92,7 @@ def test_task_success_t3_accepts_square_return_and_landing():
         "actuation_seen": True,
         "terminal_label": "DONE",
         "horizontal_displacement_m": 0.12,
-        "x_span_m": 0.95,
-        "y_span_m": 0.91,
+        "square_pattern_complete": True,
     }
     assert _task_success("T3", report) is True
 

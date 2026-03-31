@@ -60,6 +60,11 @@ Artifacts are written under `artifacts/imece/<batch_id>/...` and include:
 - `metrics.json`
 - `rosbag/`
 
+For `T3`, `metrics.json` now records whether the logged pose path actually reached the five expected square waypoints in order:
+
+- `square_waypoints_reached`
+- `square_pattern_complete`
+
 ## Analyze an existing batch
 
 ```bash

@@ -154,6 +154,7 @@ This boundary is shared by `C0` and `C1`. `C2` keeps the same generic boundary a
 
 - canonical prompt: `Take off, fly a square with one-meter sides, return near the start, and land.`
 - the square is executed with local-pose waypoints only; no semantic pattern or mission helper is introduced
+- the square is derived from the first sampled local pose rather than an assumed world origin
 - this task replaces the earlier ambiguity probe because the study is focused on the minimum control layer required for novice-requested flight behavior
 
 #### T4. Mid-flight Interrupt Handling
@@ -206,6 +207,7 @@ This boundary is shared by `C0` and `C1`. `C2` keeps the same generic boundary a
 #### T3
 
 - fly a square with one-meter sides using motion in both local `x` and local `y`
+- reach the takeoff hold, three square corners, and return hold in order, using a start-relative local `ENU` square
 - return near the start pose before landing
 - land safely
 
@@ -273,6 +275,7 @@ Promote only the lowest-support condition that satisfies all of the following:
 - first valid actuation latency
 - max setpoint gap
 - final pose error
+- `T3` square waypoint count and completion flag
 
 ### Metadata
 

@@ -95,9 +95,20 @@ class PoseRelay:
         }
 
     @staticmethod
+    def _normalize_mapping_keys(mapping: dict[str, Any]) -> dict[str, Any]:
+        normalized: dict[str, Any] = {}
+        for key, value in mapping.items():
+            normalized_key = str(key).strip().strip('"').strip("'")
+            if isinstance(value, dict):
+                normalized[normalized_key] = PoseRelay._normalize_mapping_keys(value)
+            else:
+                normalized[normalized_key] = value
+        return normalized
+
+    @staticmethod
     def _coerce_mapping(value: Any, *, field_name: str) -> dict[str, Any]:
         if isinstance(value, dict):
-            return dict(value)
+            return PoseRelay._normalize_mapping_keys(dict(value))
         if isinstance(value, str):
             stripped = value.strip()
             if not stripped:
@@ -108,7 +119,7 @@ class PoseRelay:
                 raise ValueError(f"{field_name} must be a mapping or JSON object string") from exc
             if not isinstance(decoded, dict):
                 raise ValueError(f"{field_name} must decode to a mapping")
-            return dict(decoded)
+            return PoseRelay._normalize_mapping_keys(dict(decoded))
         if value is None:
             return {}
         raise ValueError(f"{field_name} must be a mapping")

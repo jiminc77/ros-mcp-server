@@ -216,7 +216,7 @@ def test_normalize_episode_start_state_forces_landed_disarmed_baseline(monkeypat
             if topic == "/mavros/state":
                 callback({"armed": False, "mode": "AUTO.LOITER", "system_status": 3})
             elif topic == "/mavros/local_position/pose":
-                callback({"pose": {"position": {"z": 0.0}}})
+                callback({"pose": {"position": {"z": 0.0}, "orientation": {"x": 0.0, "y": 0.0}}})
 
         def stop(self) -> None:
             return
@@ -231,16 +231,28 @@ def test_normalize_episode_start_state_forces_landed_disarmed_baseline(monkeypat
 
 
 def test_vehicle_ready_requires_connected_pose_and_system_status():
-    assert runner._vehicle_ready({"connected": True, "z": 0.0, "system_status": 3}) is True
-    assert runner._vehicle_ready({"connected": True, "z": 0.0, "system_status": 0}) is False
-    assert runner._vehicle_ready({"connected": False, "z": 0.0, "system_status": 3}) is False
+    healthy = {
+        "connected": True,
+        "armed": False,
+        "mode": "AUTO.LOITER",
+        "z": 0.0,
+        "system_status": 3,
+        "orientation_x": 0.0,
+        "orientation_y": 0.0,
+    }
+    assert runner._vehicle_ready(healthy) is True
+    assert runner._vehicle_ready({**healthy, "system_status": 0}) is False
+    assert runner._vehicle_ready({**healthy, "connected": False}) is False
+    assert runner._vehicle_ready({**healthy, "armed": True}) is False
+    assert runner._vehicle_ready({**healthy, "mode": runner.OFFBOARD_MODE}) is False
+    assert runner._vehicle_ready({**healthy, "orientation_x": 0.7, "orientation_y": 0.0}) is False
 
 def test_ensure_episode_stack_ready_restarts_on_unhealthy_baseline(monkeypatch, tmp_path):
     snapshots = iter(
         [
-            {"connected": True, "z": 0.0, "system_status": 0},
-            {"connected": True, "z": 0.0, "system_status": 0},
-            {"connected": True, "z": 0.0, "system_status": 3},
+            {"connected": True, "armed": False, "mode": "AUTO.LOITER", "z": 0.0, "system_status": 0, "orientation_x": 0.0, "orientation_y": 0.0},
+            {"connected": True, "armed": False, "mode": "AUTO.LOITER", "z": 0.0, "system_status": 0, "orientation_x": 0.0, "orientation_y": 0.0},
+            {"connected": True, "armed": False, "mode": "AUTO.LOITER", "z": 0.0, "system_status": 3, "orientation_x": 0.0, "orientation_y": 0.0},
         ]
     )
     restarted = {"count": 0}
@@ -270,8 +282,8 @@ def test_ensure_episode_stack_ready_restarts_on_unhealthy_baseline(monkeypatch, 
 def test_ensure_episode_stack_ready_prefers_local_recovery(monkeypatch, tmp_path):
     snapshots = iter(
         [
-            {"connected": True, "z": 0.0, "system_status": 0},
-            {"connected": True, "z": 0.0, "system_status": 3},
+            {"connected": True, "armed": False, "mode": "AUTO.LOITER", "z": 0.0, "system_status": 0, "orientation_x": 0.0, "orientation_y": 0.0},
+            {"connected": True, "armed": False, "mode": "AUTO.LOITER", "z": 0.0, "system_status": 3, "orientation_x": 0.0, "orientation_y": 0.0},
         ]
     )
     restarted = {"count": 0}
@@ -296,3 +308,39 @@ def test_ensure_episode_stack_ready_prefers_local_recovery(monkeypatch, tmp_path
     )
 
     assert restarted["count"] == 0
+
+
+def test_square_pattern_metrics_requires_ordered_waypoints(tmp_path):
+    log_path = tmp_path / "monitor.jsonl"
+    records = [
+        {"kind": "pose", "payload": {"pose": {"position": {"x": 0.0, "y": 0.0, "z": 0.0}}}},
+        {"kind": "pose", "payload": {"pose": {"position": {"x": 0.0, "y": 0.0, "z": 1.0}}}},
+        {"kind": "pose", "payload": {"pose": {"position": {"x": 1.0, "y": 0.0, "z": 1.0}}}},
+        {"kind": "pose", "payload": {"pose": {"position": {"x": 1.0, "y": 1.0, "z": 1.0}}}},
+        {"kind": "pose", "payload": {"pose": {"position": {"x": 0.0, "y": 1.0, "z": 1.0}}}},
+        {"kind": "pose", "payload": {"pose": {"position": {"x": 0.0, "y": 0.0, "z": 1.0}}}},
+    ]
+    log_path.write_text("\n".join(json.dumps(record) for record in records) + "\n", encoding="utf-8")
+
+    metrics = runner._square_pattern_metrics(log_path)
+
+    assert metrics["square_waypoints_reached"] == 5
+    assert metrics["square_pattern_complete"] is True
+
+
+def test_square_pattern_metrics_fails_without_return_to_start(tmp_path):
+    log_path = tmp_path / "monitor.jsonl"
+    records = [
+        {"kind": "pose", "payload": {"pose": {"position": {"x": 0.0, "y": 0.0, "z": 0.0}}}},
+        {"kind": "pose", "payload": {"pose": {"position": {"x": 0.0, "y": 0.0, "z": 1.0}}}},
+        {"kind": "pose", "payload": {"pose": {"position": {"x": 1.0, "y": 0.0, "z": 1.0}}}},
+        {"kind": "pose", "payload": {"pose": {"position": {"x": 1.0, "y": 1.0, "z": 1.0}}}},
+        {"kind": "pose", "payload": {"pose": {"position": {"x": 0.0, "y": 1.0, "z": 1.0}}}},
+        {"kind": "pose", "payload": {"pose": {"position": {"x": 0.0, "y": 1.0, "z": 0.0}}}},
+    ]
+    log_path.write_text("\n".join(json.dumps(record) for record in records) + "\n", encoding="utf-8")
+
+    metrics = runner._square_pattern_metrics(log_path)
+
+    assert metrics["square_waypoints_reached"] == 4
+    assert metrics["square_pattern_complete"] is False

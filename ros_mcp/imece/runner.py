@@ -361,7 +361,15 @@ def _sample_vehicle_state(
     port: int,
     timeout_s: float = 5.0,
 ) -> dict[str, Any]:
-    state: dict[str, Any] = {"connected": None, "armed": None, "mode": None, "system_status": None, "z": None}
+    state: dict[str, Any] = {
+        "connected": None,
+        "armed": None,
+        "mode": None,
+        "system_status": None,
+        "z": None,
+        "orientation_x": None,
+        "orientation_y": None,
+    }
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         subscriber = None
@@ -377,10 +385,16 @@ def _sample_vehicle_state(
             def on_pose(message: dict[str, Any]) -> None:
                 pose = message.get("pose", {})
                 position = pose.get("position", {}) if isinstance(pose, dict) else {}
+                orientation = pose.get("orientation", {}) if isinstance(pose, dict) else {}
                 try:
                     state["z"] = float(position.get("z"))
                 except (TypeError, ValueError):
-                    return
+                    pass
+                try:
+                    state["orientation_x"] = float(orientation.get("x"))
+                    state["orientation_y"] = float(orientation.get("y"))
+                except (TypeError, ValueError):
+                    pass
 
             subscriber.subscribe("/mavros/state", "mavros_msgs/msg/State", on_state)
             subscriber.subscribe("/mavros/local_position/pose", "geometry_msgs/msg/PoseStamped", on_pose)
@@ -397,12 +411,32 @@ def _sample_vehicle_state(
     return dict(state)
 
 
+def _vehicle_upright(snapshot: dict[str, Any]) -> bool:
+    try:
+        orientation_x = float(snapshot.get("orientation_x"))
+        orientation_y = float(snapshot.get("orientation_y"))
+    except (TypeError, ValueError):
+        return False
+    return abs(orientation_x) <= 0.2 and abs(orientation_y) <= 0.2
+
+
 def _vehicle_ready(snapshot: dict[str, Any]) -> bool:
     try:
         system_status = int(snapshot.get("system_status"))
     except (TypeError, ValueError):
         system_status = 0
-    return bool(snapshot.get("connected")) and snapshot.get("z") is not None and system_status >= 3
+    try:
+        z = float(snapshot.get("z"))
+    except (TypeError, ValueError):
+        return False
+    return (
+        bool(snapshot.get("connected"))
+        and snapshot.get("armed") is False
+        and snapshot.get("mode") != OFFBOARD_MODE
+        and z <= 0.2
+        and system_status >= 3
+        and _vehicle_upright(snapshot)
+    )
 
 
 def _restart_sim_stack(*, cwd: Path, progress_enabled: bool) -> None:
@@ -422,7 +456,7 @@ def _ensure_episode_stack_ready(
     port: int,
     progress_enabled: bool,
 ) -> None:
-    snapshot = _sample_vehicle_state(host=host, port=port, timeout_s=5.0)
+    snapshot = _sample_vehicle_state(host=host, port=port, timeout_s=15.0)
     if _vehicle_ready(snapshot):
         return
     _log(progress_enabled, f"[episode] unhealthy baseline detected state={snapshot}")
@@ -433,7 +467,7 @@ def _ensure_episode_stack_ready(
         pass
     finally:
         requester.close()
-    recovered_snapshot = _sample_vehicle_state(host=host, port=port, timeout_s=5.0)
+    recovered_snapshot = _sample_vehicle_state(host=host, port=port, timeout_s=10.0)
     if _vehicle_ready(recovered_snapshot):
         _log(progress_enabled, f"[episode] recovered baseline locally state={recovered_snapshot}")
         return
@@ -475,7 +509,14 @@ def _normalize_episode_start_state(
     except Exception:
         pass
 
-    state: dict[str, Any] = {"armed": None, "z": None, "mode": None, "system_status": None}
+    state: dict[str, Any] = {
+        "armed": None,
+        "z": None,
+        "mode": None,
+        "system_status": None,
+        "orientation_x": None,
+        "orientation_y": None,
+    }
     subscriber = RosbridgeSubscriber(host, port, timeout=1.0)
 
     def on_state(message: dict[str, Any]) -> None:
@@ -486,10 +527,16 @@ def _normalize_episode_start_state(
     def on_pose(message: dict[str, Any]) -> None:
         pose = message.get("pose", {})
         position = pose.get("position", {}) if isinstance(pose, dict) else {}
+        orientation = pose.get("orientation", {}) if isinstance(pose, dict) else {}
         try:
             state["z"] = float(position.get("z"))
         except (TypeError, ValueError):
-            return
+            pass
+        try:
+            state["orientation_x"] = float(orientation.get("x"))
+            state["orientation_y"] = float(orientation.get("y"))
+        except (TypeError, ValueError):
+            pass
 
     try:
         subscriber.subscribe("/mavros/state", "mavros_msgs/msg/State", on_state)
@@ -506,6 +553,7 @@ def _normalize_episode_start_state(
                 and float(state["z"]) <= 0.2
                 and state.get("mode") != OFFBOARD_MODE
                 and system_status >= 3
+                and _vehicle_upright(state)
             ):
                 return
             time.sleep(0.1)
@@ -513,13 +561,76 @@ def _normalize_episode_start_state(
         subscriber.stop()
 
 
+def _load_pose_samples(log_path: Path) -> list[dict[str, float]]:
+    samples: list[dict[str, float]] = []
+    if not log_path.exists():
+        return samples
+    with log_path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if record.get("kind") != "pose":
+                continue
+            payload = record.get("payload") or {}
+            pose = payload.get("pose") if isinstance(payload, dict) else None
+            position = pose.get("position") if isinstance(pose, dict) else None
+            if not isinstance(position, dict):
+                continue
+            try:
+                samples.append(
+                    {
+                        "x": float(position["x"]),
+                        "y": float(position["y"]),
+                        "z": float(position["z"]),
+                    }
+                )
+            except (KeyError, TypeError, ValueError):
+                continue
+    return samples
+
+
+def _square_pattern_metrics(log_path: Path) -> dict[str, Any]:
+    samples = _load_pose_samples(log_path)
+    if not samples:
+        return {"square_waypoints_reached": 0, "square_pattern_complete": False}
+
+    start = samples[0]
+    targets = (
+        {"x": start["x"], "y": start["y"], "z": 1.0},
+        {"x": start["x"] + 1.0, "y": start["y"], "z": 1.0},
+        {"x": start["x"] + 1.0, "y": start["y"] + 1.0, "z": 1.0},
+        {"x": start["x"], "y": start["y"] + 1.0, "z": 1.0},
+        {"x": start["x"], "y": start["y"], "z": 1.0},
+    )
+
+    reached = 0
+    for sample in samples:
+        target = targets[reached]
+        if (
+            abs(sample["x"] - target["x"]) <= 0.25
+            and abs(sample["y"] - target["y"]) <= 0.25
+            and abs(sample["z"] - target["z"]) <= 0.25
+        ):
+            reached += 1
+            if reached == len(targets):
+                break
+
+    return {
+        "square_waypoints_reached": reached,
+        "square_pattern_complete": reached == len(targets),
+    }
+
+
 def _task_success(task_id: str, report: dict[str, Any]) -> bool:
     max_altitude = float(report.get("max_altitude_m", 0.0))
     final_position = report.get("final_position") or {}
     final_z = float(final_position.get("z", 0.0)) if isinstance(final_position, dict) else 0.0
     horizontal = report.get("horizontal_displacement_m")
-    x_span = report.get("x_span_m")
-    y_span = report.get("y_span_m")
     latest_armed = report.get("latest_armed")
     actuation_seen = bool(report.get("actuation_seen"))
     terminal_label = report.get("terminal_label")
@@ -540,10 +651,7 @@ def _task_success(task_id: str, report: dict[str, Any]) -> bool:
             terminal_label == "DONE"
             and actuation_seen
             and max_altitude >= 0.8
-            and x_span is not None
-            and y_span is not None
-            and float(x_span) >= 0.6
-            and float(y_span) >= 0.6
+            and bool(report.get("square_pattern_complete"))
             and horizontal is not None
             and float(horizontal) <= 0.35
             and safe_landed
@@ -707,6 +815,11 @@ def run_episode(args: argparse.Namespace) -> Path:
 
         time.sleep(1.0)
         snapshot = monitor.snapshot()
+        square_metrics = (
+            _square_pattern_metrics(episode_dir / "monitor.jsonl")
+            if task_spec.task_id == "T3"
+            else {}
+        )
         all_events = [event for turn in turns for event in turn["events"]]
         infra_error_reasons: list[str] = []
         for turn in turns:
@@ -754,6 +867,7 @@ def run_episode(args: argparse.Namespace) -> Path:
             "infra_error_reasons": infra_error_reasons,
             "task_success": False,
         }
+        metrics.update(square_metrics)
         metrics["task_success"] = _task_success(task_spec.task_id, metrics)
         metrics["failure_codes"] = classify_episode_report(metrics)
 

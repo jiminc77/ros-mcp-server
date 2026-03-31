@@ -70,5 +70,7 @@ def test_t3_prompt_includes_square_pattern_protocol():
     prompt = build_episode_prompt("C2", "T3", 1, "127.0.0.1", 9090, selected_helpers=["setpoint_relay"])
     assert "task_name: `Square Pattern Flight`" in prompt
     assert "fly a square with one-meter sides" in prompt
-    assert "Use exactly five motion targets" in prompt
+    assert "derive the square from that start `x` and `y`" in prompt
+    assert "Use exactly five `setpoint_relay` motion targets" in prompt
     assert "Keep the square axis-aligned in local ENU" in prompt
+    assert "within about `0.2 m` in local `x/y` and `0.25 m` in `z`" in prompt

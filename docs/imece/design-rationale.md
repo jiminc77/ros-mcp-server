@@ -143,7 +143,7 @@ The next preserved artifact should therefore be the `c2_freeze` validation batch
 
 That next stage is where the paper should claim that `C2` repairs the specific low-level gap left by `C1`.
 
-The regenerated `T3` square-pattern discovery evidence does not currently justify a new helper class. It continues to fail through the same transport/timing and timeout modes already captured by `setpoint_relay`, `mode_guard`, and `abort_watchdog`. What it does change is the freeze-validation scope: because `T3` is now a core study task rather than the removed ambiguity probe, `c2_freeze` must also validate `T3`.
+The regenerated `T3` square-pattern discovery evidence does not currently justify a new helper class. It continues to fail through the same transport/timing and timeout modes already captured by `setpoint_relay`, `mode_guard`, and `abort_watchdog`. What it does change is the freeze-validation scope: because `T3` is now a core study task rather than the removed ambiguity probe, `c2_freeze` must also validate `T3`. `T3` is now judged from the logged pose path itself, not only from coarse span metrics, so the square must actually reach the takeoff hold, three corners, and return hold in order.
 
 ## 8. Experiment counts from the specification
 
