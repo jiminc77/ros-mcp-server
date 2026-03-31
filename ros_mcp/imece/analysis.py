@@ -7,6 +7,55 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from .scoring import task_success
+
+HISTORICAL_INTERFACE_MISMATCH_SNIPPETS = (
+    "wait_for_previous",
+    "unexpected keyword argument",
+)
+
+EXPLICIT_FRAME_ERROR_SNIPPETS = (
+    "invalid frame",
+    "frame mismatch",
+    "frame_id must",
+    "frame id must",
+    "enu",
+    "ned",
+    "body frame",
+    "body-frame",
+    "quaternion",
+    "negative altitude",
+)
+
+RUNTIME_METADATA_FIELDS = (
+    "repo_commit_sha",
+    "ros_mcp_repo_commit_sha",
+    "px4_commit_sha",
+    "gemini_cli_version",
+    "actual_routed_model",
+    "mavros_version",
+    "gazebo_version",
+    "ros_distro",
+)
+
+
+def historical_interface_mismatch(report: dict[str, Any]) -> bool:
+    errors = "\n".join(report.get("tool_error_messages", [])).lower()
+    return all(snippet in errors for snippet in HISTORICAL_INTERFACE_MISMATCH_SNIPPETS)
+
+
+def explicit_frame_error(report: dict[str, Any]) -> bool:
+    if historical_interface_mismatch(report):
+        return False
+    errors = "\n".join(report.get("tool_error_messages", [])).lower()
+    return any(snippet in errors for snippet in EXPLICIT_FRAME_ERROR_SNIPPETS)
+
+
+def effective_task_success(report: dict[str, Any]) -> bool:
+    if "task_success_current_spec" in report:
+        return bool(report.get("task_success_current_spec"))
+    return bool(report.get("task_success"))
+
 
 def classify_episode_report(report: dict[str, Any]) -> list[str]:
     failures: list[str] = []
@@ -23,6 +72,7 @@ def classify_episode_report(report: dict[str, Any]) -> list[str]:
     final_position = report.get("final_position") or {}
     final_z = float(final_position.get("z", 0.0)) if isinstance(final_position, dict) else 0.0
     safe_landed = final_z <= 0.2 and report.get("latest_armed") is False
+    interface_mismatch = historical_interface_mismatch(report)
 
     if terminal_label == "CLARIFY" and actuation_seen:
         failures.append("F1")
@@ -30,20 +80,19 @@ def classify_episode_report(report: dict[str, Any]) -> list[str]:
     if invalid_tool_call_count > 0:
         failures.append("F2")
 
-    frame_keywords = ("frame", "enu", "ned", "quaternion", "altitude")
-    if any(keyword in tool_errors.lower() for keyword in frame_keywords):
+    if explicit_frame_error(report):
         failures.append("F3")
 
     explicit_transport_error = (
         offboard_rejection_count > 0
         or (offboard_drop_count > 0 and not intentional_t4_pause)
-        or "offboard" in tool_errors.lower()
-        or "setpoint" in tool_errors.lower()
+        or ("offboard" in tool_errors.lower() and not interface_mismatch)
+        or ("setpoint" in tool_errors.lower() and not interface_mismatch)
     )
     sparse_stream = (
         float(report.get("max_setpoint_gap_s", 0.0)) > 1.0
         and not intentional_t4_pause
-        and not (report.get("task_success") and safe_landed and not explicit_transport_error)
+        and not (effective_task_success(report) and safe_landed and not explicit_transport_error)
     )
     if explicit_transport_error or sparse_stream:
         failures.append("F4")
@@ -61,13 +110,18 @@ def classify_episode_report(report: dict[str, Any]) -> list[str]:
 def _count_streaming_f4(report: dict[str, Any]) -> bool:
     return (
         float(report.get("max_setpoint_gap_s", 0.0)) > 1.0
-        or "setpoint" in "\n".join(report.get("tool_error_messages", [])).lower()
+        or (
+            "setpoint" in "\n".join(report.get("tool_error_messages", [])).lower()
+            and not historical_interface_mismatch(report)
+        )
     )
 
 
 def _count_mode_f4(report: dict[str, Any]) -> bool:
     errors = "\n".join(report.get("tool_error_messages", [])).lower()
-    return int(report.get("offboard_rejection_count", 0)) > 0 or "offboard" in errors
+    return int(report.get("offboard_rejection_count", 0)) > 0 or (
+        "offboard" in errors and not historical_interface_mismatch(report)
+    )
 
 
 def _unsafe_abort(report: dict[str, Any]) -> bool:
@@ -99,7 +153,7 @@ def select_c2_helpers(episode_reports: list[dict[str, Any]]) -> dict[str, Any]:
         selected.append("mode_guard")
         reasoning.append(f"mode_guard enabled after {mode_failures} post-C1 mode-transition failures")
 
-    frame_failures = sum(1 for report in c1_reports if "F3" in report.get("failure_codes", []))
+    frame_failures = sum(1 for report in c1_reports if explicit_frame_error(report))
     if frame_failures >= 2:
         selected.append("frame_guard")
         reasoning.append(f"frame_guard enabled after {frame_failures} post-C1 frame/sign failures")
@@ -116,6 +170,115 @@ def select_c2_helpers(episode_reports: list[dict[str, Any]]) -> dict[str, Any]:
         "counts": dict(
             Counter(code for report in c1_reports for code in report.get("failure_codes", []))
         ),
+    }
+
+
+def audit_batch(batch_dir: Path) -> dict[str, Any]:
+    reports: list[dict[str, Any]] = []
+    mismatches: list[dict[str, Any]] = []
+    interface_mismatch_episodes: list[dict[str, Any]] = []
+    explicit_frame_episodes: list[dict[str, Any]] = []
+    success_by_condition_task: dict[str, dict[str, int]] = {}
+    metadata_coverage = {field: 0 for field in RUNTIME_METADATA_FIELDS}
+    episodes_with_runtime_metadata = 0
+    episodes_missing_runtime_metadata: list[str] = []
+
+    for metrics_path in sorted(batch_dir.rglob("metrics.json")):
+        with metrics_path.open("r", encoding="utf-8") as handle:
+            report = json.load(handle)
+        report["task_success_current_spec"] = task_success(str(report.get("task_id")), report)
+        report["historical_interface_mismatch"] = historical_interface_mismatch(report)
+        report["explicit_frame_error"] = explicit_frame_error(report)
+        reports.append(report)
+
+        key = f"{report.get('condition')}:{report.get('task_id')}"
+        bucket = success_by_condition_task.setdefault(key, {"success": 0, "total": 0})
+        bucket["total"] += 1
+        if report["task_success_current_spec"]:
+            bucket["success"] += 1
+
+        stored_success = report.get("stored_task_success", report.get("task_success"))
+        if bool(stored_success) != bool(report["task_success_current_spec"]):
+            mismatches.append(
+                {
+                    "episode": f"{report.get('condition')}:{report.get('task_id')}:{int(report.get('episode_index', 0)):02d}",
+                    "stored_task_success": stored_success,
+                    "current_task_success": report["task_success_current_spec"],
+                }
+            )
+        if report["historical_interface_mismatch"]:
+            interface_mismatch_episodes.append(
+                {
+                    "episode": f"{report.get('condition')}:{report.get('task_id')}:{int(report.get('episode_index', 0)):02d}",
+                    "failure_codes": report.get("failure_codes", []),
+                }
+            )
+        if report["explicit_frame_error"]:
+            explicit_frame_episodes.append(
+                {
+                    "episode": f"{report.get('condition')}:{report.get('task_id')}:{int(report.get('episode_index', 0)):02d}",
+                    "failure_codes": report.get("failure_codes", []),
+                }
+            )
+
+        metadata_path = metrics_path.with_name("metadata.json")
+        runtime_metadata = {}
+        if metadata_path.exists():
+            with metadata_path.open("r", encoding="utf-8") as handle:
+                metadata = json.load(handle)
+            runtime_metadata = metadata.get("runtime_metadata", {})
+            if isinstance(runtime_metadata, dict) and runtime_metadata:
+                episodes_with_runtime_metadata += 1
+        episode_name = (
+            f"{report.get('condition')}:{report.get('task_id')}:{int(report.get('episode_index', 0)):02d}"
+        )
+        missing_runtime_fields = []
+        for field in RUNTIME_METADATA_FIELDS:
+            value = runtime_metadata.get(field) if isinstance(runtime_metadata, dict) else None
+            if value not in (None, ""):
+                metadata_coverage[field] += 1
+            else:
+                missing_runtime_fields.append(field)
+        if missing_runtime_fields:
+            episodes_missing_runtime_metadata.append(episode_name)
+
+    notes: list[str] = []
+    if interface_mismatch_episodes:
+        notes.append(
+            "Preserved discovery contains historical generic-tool schema mismatches; treat related F2/F4 counts as contaminated by interface drift."
+        )
+    if mismatches:
+        notes.append(
+            "Stored task_success labels in preserved artifacts do not always match the current task specification; use current_task_success summaries for paper claims."
+        )
+    if not explicit_frame_episodes:
+        notes.append(
+            "The preserved artifact set does not contain repeated explicit frame/sign error traces under the current classifier."
+        )
+    if episodes_missing_runtime_metadata:
+        notes.append(
+            "Some preserved artifacts predate top-level runtime metadata capture; use current runner outputs for paper-grade reproducibility metadata in official_sim."
+        )
+
+    return {
+        "batch_dir": str(batch_dir),
+        "stored_vs_current_task_success_mismatches": mismatches,
+        "current_task_success_by_condition_task": success_by_condition_task,
+        "historical_interface_mismatch": {
+            "count": len(interface_mismatch_episodes),
+            "episodes": interface_mismatch_episodes,
+        },
+        "explicit_frame_error": {
+            "count": len(explicit_frame_episodes),
+            "episodes": explicit_frame_episodes,
+        },
+        "reproducibility_metadata": {
+            "required_fields": list(RUNTIME_METADATA_FIELDS),
+            "episodes_with_runtime_metadata": episodes_with_runtime_metadata,
+            "episodes_missing_runtime_metadata": episodes_missing_runtime_metadata,
+            "field_coverage": metadata_coverage,
+        },
+        "notes": notes,
     }
 
 
@@ -167,6 +330,12 @@ def analyze_batch(batch_dir: Path) -> dict[str, Any]:
     for metrics_path in sorted(batch_dir.rglob("metrics.json")):
         with metrics_path.open("r", encoding="utf-8") as handle:
             report = json.load(handle)
+        if "stored_task_success" not in report:
+            report["stored_task_success"] = report.get("task_success")
+        report["task_success_current_spec"] = task_success(str(report.get("task_id")), report)
+        report["historical_interface_mismatch"] = historical_interface_mismatch(report)
+        report["explicit_frame_error"] = explicit_frame_error(report)
+        report["task_success"] = report["task_success_current_spec"]
         report["failure_codes"] = classify_episode_report(report)
         reports.append(report)
         with metrics_path.open("w", encoding="utf-8") as handle:
@@ -174,4 +343,5 @@ def analyze_batch(batch_dir: Path) -> dict[str, Any]:
             handle.write("\n")
     selection = select_c2_helpers(reports)
     freeze_review = review_c2_freeze_batch(reports)
-    return {"reports": reports, "selection": selection, "freeze_review": freeze_review}
+    audit = audit_batch(batch_dir)
+    return {"reports": reports, "selection": selection, "freeze_review": freeze_review, "audit": audit}

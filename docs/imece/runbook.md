@@ -65,6 +65,8 @@ For `T3`, `metrics.json` now records whether the logged pose path actually reach
 - `square_waypoints_reached`
 - `square_pattern_complete`
 
+The current generic verification tool also returns compact subscription payloads with `first_msg`, `last_msg`, and `summary` so long pose windows do not flood the model context.
+
 ## Analyze an existing batch
 
 ```bash
@@ -74,6 +76,15 @@ uv run python -m ros_mcp.imece.runner analyze-batch \
 ```
 
 This updates each `metrics.json` with `failure_codes` and writes batch-level helper selection output.
+
+To write the fairness and reproducibility audit alongside the batch analysis:
+
+```bash
+uv run python -m ros_mcp.imece.runner audit-batch \
+  --batch-dir artifacts/imece/<batch_id>
+```
+
+`run-batch` and `run-phase` also write `audit.json` automatically after the batch analysis step.
 
 ## Plan the full study
 
@@ -88,6 +99,21 @@ This prints the official episode counts from the experiment specification, inclu
 - official simulation: `120`
 - official real-flight: `10`
 - fixed total with one `C2` freeze batch: `190`
+
+## Run official simulation
+
+```bash
+uv run python -m ros_mcp.imece.runner run-phase official_sim \
+  --batch-id official-sim-001 \
+  --resume \
+  --max-attempts 3
+```
+
+This should be started only after documenting the preserved staged argument honestly:
+
+- discovery justifies the frozen `C2` subset
+- the preserved targeted `C2:T3` batch closes the last remaining final-task gap
+- this is still narrower than a claim of full `C2` validation across `T1-T4`
 
 ## Run one real-flight episode
 
@@ -133,5 +159,7 @@ uv run python -m ros_mcp.imece.runner run-batch \
 ## Current assumptions
 
 - The runner uses fresh non-interactive Gemini turns plus `--resume` for continuation. For `T4` mid-flight interrupt handling, the first turn pauses at the halfway hold and ends with `CLARIFY`; the scheduled `Stop there.` or `Land now.` correction prompt is then sent as the next turn in the same session.
-- `frame_guard` and `abort_watchdog` are implemented as helper-runtime behavior. The visible helper tools are `setpoint_relay` and `mode_guard`.
+- The current frozen `C2` subset is `setpoint_relay`, `mode_guard`, and `abort_watchdog`.
+- The runner loads missing variables from the repo-local `.env` file before launching Gemini CLI, so `GEMINI_API_KEY=...` can live in `.env` without manual export.
+- `abort_watchdog` is implemented as helper-runtime behavior. The visible helper tools are `setpoint_relay` and `mode_guard`.
 - `c2_freeze.json` is the freeze artifact consumed by `C2` runs.

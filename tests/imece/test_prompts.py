@@ -50,6 +50,7 @@ def test_shared_terminal_contract_is_present():
     assert "CLARIFY:" in prompt
     assert "REFUSE:" in prompt
     assert "DONE:" in prompt
+    assert "Never end with `DONE.`" in prompt
 
 
 def test_t4_prompt_includes_staged_followup_protocol():
@@ -70,10 +71,14 @@ def test_t3_prompt_includes_square_pattern_protocol():
     prompt = build_episode_prompt("C2", "T3", 1, "127.0.0.1", 9090, selected_helpers=["setpoint_relay"])
     assert "task_name: `Square Pattern Flight`" in prompt
     assert "fly a square with one-meter sides" in prompt
-    assert "derive the square from that start `x` and `y`" in prompt
+    assert "Read the current local pose exactly once" in prompt
     assert "Use exactly five `setpoint_relay` motion targets" in prompt
     assert "Keep the square axis-aligned in local ENU" in prompt
-    assert "within about `0.2 m` in local `x/y` and `0.25 m` in `z`" in prompt
+    assert "subscribe_for_duration" in prompt
+    assert "`3.0` seconds per check" in prompt
+    assert "at most two checks for the same target" in prompt
+    assert "Read the verification result from `last_msg.pose.position`" in prompt
+    assert "DONE: square complete" in prompt
 
 
 def test_r2_prompt_reuses_translation_protocol():

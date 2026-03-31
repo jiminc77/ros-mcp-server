@@ -67,7 +67,7 @@ Representative failures:
   - `max_altitude_m = 1.9835`
   - `timed_out = true`
 - `C1/T1/episode-02/metrics.json`
-  - `failure_codes = ["F2", "F3", "F4"]`
+  - `failure_codes = ["F2", "F4"]`
   - `invalid_tool_call_count = 2`
   - `setpoint_count = 4`
   - `offboard_rejection_count = 2`
@@ -92,11 +92,10 @@ That is the exact point of the staged argument:
 
 ## 5. Why the frozen C2 layer is minimal
 
-The helper freeze output is stored in [`config/imece/c2_freeze.json`](../../config/imece/c2_freeze.json):
+The helper freeze output is stored in [`config/imece/c2_freeze.json`](../../config/imece/c2_freeze.json), but the discovery batch analysis is the source of truth that produces it:
 
 - repeated `F4` after `C1` selected `setpoint_relay`
 - repeated `F4` mode-transition failures selected `mode_guard`
-- repeated `F3` after `C1` selected `frame_guard`
 - at least one unsafe timeout/abort selected `abort_watchdog`
 
 This is important for the paper narrative. The chosen subset is not a convenience bundle. Each helper is tied to a repeated failure class:
@@ -107,12 +106,22 @@ This is important for the paper narrative. The chosen subset is not a convenienc
 - `mode_guard`
   - repairs ordering failures around `prestream -> OFFBOARD -> arm`
   - exposes only guarded offboard engage and land
-- `frame_guard`
-  - repairs repeated frame/sign mistakes seen in discovery
-  - rejects body/NED-like frame IDs and negative local ENU altitude targets
 - `abort_watchdog`
   - repairs timeout and abort safety gaps
   - forces `LAND` when the runner heartbeat stops or an abort flag is raised
+
+The preserved discovery audit now matters here. It shows:
+
+- many preserved discovery failures contain historical generic-tool schema mismatch
+- repeated explicit frame/sign failures are not present under the current classifier
+
+So the current paper-safe frozen subset is:
+
+- `setpoint_relay`
+- `mode_guard`
+- `abort_watchdog`
+
+`frame_guard` is still implemented in the codebase as an available helper, but it is not part of the currently frozen subset and should not be described as discovery-frozen evidence.
 
 Minimality still matters here. The discovery batch froze only the helpers backed by repeated post-`C1` evidence. No extra semantic takeoff, goto, or mission-level abstraction was added.
 
@@ -126,7 +135,7 @@ The `C2` prompt builder in `ros_mcp/imece/config.py` separates:
 This matters because:
 
 - `setpoint_relay` and `mode_guard` are tools the agent can call
-- `frame_guard` and `abort_watchdog` are active runtime behavior, not callable primitives
+- `abort_watchdog` is active runtime behavior, not a callable primitive
 
 Without that separation, the prompt would incorrectly suggest that all selected helpers are agent-facing tools, which would blur the experiment boundary.
 
@@ -134,16 +143,22 @@ Without that separation, the prompt would incorrectly suggest that all selected 
 
 `discovery-20260331` justifies the frozen `C2` subset. It does not by itself replace the dedicated `C2` confirmation stage.
 
-The next preserved artifact should therefore be the `c2_freeze` validation batch that runs with this exact frozen subset:
+The current preserved confirmation artifact is the targeted `c2-freeze-t3-20260331` validation batch, which runs with this exact frozen subset:
 
 - `setpoint_relay`
 - `mode_guard`
-- `frame_guard`
 - `abort_watchdog`
 
-That next stage is where the paper should claim that `C2` repairs the specific low-level gap left by `C1`.
+That preserved stage supports one narrow claim: the remaining `T3` square-pattern gap was repaired under the frozen subset. It does not yet support the broader claim that `C2` has been fully validated across all of `T1-T4`.
 
 The regenerated `T3` square-pattern discovery evidence does not currently justify a new helper class. It continues to fail through the same transport/timing and timeout modes already captured by `setpoint_relay`, `mode_guard`, and `abort_watchdog`. What it does change is the freeze-validation scope: because `T3` is now a core study task rather than the removed ambiguity probe, `c2_freeze` must also validate `T3`. `T3` is now judged from the logged pose path itself, not only from coarse span metrics, so the square must actually reach the takeoff hold, three corners, and return hold in order.
+
+Before `official_sim`, the shared generic surface was stabilized in two narrow, non-semantic ways:
+
+- generic tools now tolerate stray `wait_for_previous` fields instead of failing on interface drift
+- `subscribe_for_duration` now returns a compact summary with `first_msg`, `last_msg`, and `summary` so the model does not waste context on long pose dumps
+
+This does not change the preserved discovery argument. It means only that the official comparison phase can start from a stable shared interface across all conditions.
 
 ## 8. Experiment counts from the specification
 

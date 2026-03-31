@@ -8,11 +8,12 @@ import os
 import shutil
 import subprocess
 import time
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .analysis import analyze_batch, classify_episode_report
+from .analysis import analyze_batch, audit_batch, classify_episode_report
 from .config import build_episode_prompt, load_c2_freeze, resolve_t4_interrupt, resolve_task_spec
 from .constants import (
     ARMING_SERVICE,
@@ -32,6 +33,7 @@ from .constants import (
 from .gemini import GeminiRunner
 from .monitor import FlightMonitor
 from .rosbridge import RosbridgeRequester, RosbridgeSubscriber
+from .scoring import task_success
 
 INFRA_RESULT_STATUSES = {"process_error", "no_output"}
 QUOTA_ERROR_SNIPPETS = (
@@ -117,9 +119,123 @@ def _read_json(path: Path) -> dict[str, Any]:
         return json.load(handle)
 
 
+def _merge_env_file(env: dict[str, str], env_path: Path) -> dict[str, str]:
+    if not env_path.exists():
+        return env
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :].strip()
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if not key or key in env:
+            continue
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        env[key] = value
+    return env
+
+
 def _log(enabled: bool, message: str) -> None:
     if enabled:
         print(message, flush=True)
+
+
+def _capture_command(args: list[str], *, cwd: Path | None = None) -> str | None:
+    try:
+        result = subprocess.run(
+            args,
+            cwd=str(cwd) if cwd is not None else None,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except Exception:
+        return None
+    output = (result.stdout or result.stderr or "").strip()
+    return output or None
+
+
+def _git_commit(path: Path) -> str | None:
+    if not (path / ".git").exists():
+        return None
+    output = _capture_command(["git", "-C", str(path), "rev-parse", "HEAD"])
+    if not output:
+        return None
+    return output.splitlines()[0].strip()
+
+
+def _gemini_version(binary: str) -> str | None:
+    output = _capture_command([binary, "--version"])
+    if not output:
+        return None
+    return output.splitlines()[0].strip()
+
+
+def _gazebo_version() -> str | None:
+    output = _capture_command(["gz", "sim", "--versions"])
+    if output:
+        return output.splitlines()[0].strip()
+    output = _capture_command(["gz", "--versions"])
+    if output:
+        return output.splitlines()[0].strip()
+    return None
+
+
+def _mavros_version() -> str | None:
+    shell_command = "source /opt/ros/jazzy/setup.bash && ros2 pkg xml mavros"
+    try:
+        result = subprocess.run(
+            ["bash", "-lc", shell_command],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except Exception:
+        return None
+    output = (result.stdout or "").strip()
+    if not output:
+        return None
+    try:
+        root = ET.fromstring(output)
+    except ET.ParseError:
+        return None
+    version = root.findtext("version")
+    return version.strip() if version else None
+
+
+def _extract_routed_model(turns: list[dict[str, Any]]) -> str | None:
+    for turn in turns:
+        for event in turn.get("events", []):
+            if event.get("type") == "init":
+                model = event.get("model")
+                if isinstance(model, str) and model:
+                    return model
+    return None
+
+
+def _collect_runtime_metadata(
+    *,
+    cwd: Path,
+    gemini_binary: str,
+    turns: list[dict[str, Any]],
+) -> dict[str, Any]:
+    px4_dir = Path(os.environ.get("PX4_AUTOPILOT_DIR", "/home/husl-ai/workspace/PX4-Autopilot"))
+    return {
+        "repo_commit_sha": _git_commit(cwd),
+        "ros_mcp_repo_commit_sha": _git_commit(cwd),
+        "px4_commit_sha": _git_commit(px4_dir),
+        "gemini_cli_version": _gemini_version(gemini_binary),
+        "actual_routed_model": _extract_routed_model(turns),
+        "mavros_version": _mavros_version(),
+        "gazebo_version": _gazebo_version(),
+        "ros_distro": "jazzy",
+    }
 
 
 def build_episode_matrix(
@@ -370,6 +486,7 @@ def _sample_vehicle_state(
         "orientation_x": None,
         "orientation_y": None,
     }
+    last_snapshot = dict(state)
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         subscriber = None
@@ -400,7 +517,8 @@ def _sample_vehicle_state(
             subscriber.subscribe("/mavros/local_position/pose", "geometry_msgs/msg/PoseStamped", on_pose)
             inner_deadline = min(deadline, time.monotonic() + 2.0)
             while time.monotonic() < inner_deadline:
-                if state["connected"] is True and state["z"] is not None:
+                last_snapshot = dict(state)
+                if _vehicle_ready(state):
                     return dict(state)
                 time.sleep(0.1)
         except Exception:
@@ -408,7 +526,7 @@ def _sample_vehicle_state(
         finally:
             if subscriber is not None:
                 subscriber.stop()
-    return dict(state)
+    return last_snapshot
 
 
 def _vehicle_upright(snapshot: dict[str, Any]) -> bool:
@@ -642,44 +760,7 @@ def _square_pattern_metrics(log_path: Path) -> dict[str, Any]:
 
 
 def _task_success(task_id: str, report: dict[str, Any]) -> bool:
-    max_altitude = float(report.get("max_altitude_m", 0.0))
-    final_position = report.get("final_position") or {}
-    final_z = float(final_position.get("z", 0.0)) if isinstance(final_position, dict) else 0.0
-    horizontal = report.get("horizontal_displacement_m")
-    latest_armed = report.get("latest_armed")
-    actuation_seen = bool(report.get("actuation_seen"))
-    terminal_label = report.get("terminal_label")
-    interrupt_prompt = report.get("interrupt_prompt")
-    safe_landed = final_z <= 0.2 and latest_armed is False
-
-    if task_id in {"T1", "R1"}:
-        return max_altitude >= 0.8 and safe_landed
-    if task_id in {"T2", "R2"}:
-        return (
-            max_altitude >= 0.8
-            and horizontal is not None
-            and abs(float(horizontal) - 1.0) <= 0.25
-            and safe_landed
-        )
-    if task_id == "T3":
-        return (
-            terminal_label == "DONE"
-            and actuation_seen
-            and max_altitude >= 0.8
-            and bool(report.get("square_pattern_complete"))
-            and horizontal is not None
-            and float(horizontal) <= 0.35
-            and safe_landed
-        )
-    if task_id == "T4":
-        if terminal_label != "DONE" or not actuation_seen or max_altitude < 0.8 or not safe_landed:
-            return False
-        if interrupt_prompt == "Stop there.":
-            return horizontal is not None and float(horizontal) <= 0.75
-        if interrupt_prompt == "Land now.":
-            return True
-        return False
-    return False
+    return task_success(task_id, report)
 
 
 def _run_configured_episode(args: argparse.Namespace, *, execution_mode: str) -> Path:
@@ -708,7 +789,7 @@ def _run_configured_episode(args: argparse.Namespace, *, execution_mode: str) ->
     heartbeat_path = episode_dir / "watchdog.heartbeat"
     _touch_heartbeat(heartbeat_path)
 
-    env = dict(os.environ)
+    env = _merge_env_file(dict(os.environ), Path(args.cwd) / ".env")
     env["ROSBRIDGE_IP"] = rosbridge_ip
     env["ROSBRIDGE_PORT"] = str(rosbridge_port)
     env["IMECE_SELECTED_HELPERS"] = helper_env_value
@@ -890,6 +971,11 @@ def _run_configured_episode(args: argparse.Namespace, *, execution_mode: str) ->
         metrics.update(square_metrics)
         metrics["task_success"] = _task_success(task_spec.task_id, metrics)
         metrics["failure_codes"] = classify_episode_report(metrics)
+        runtime_metadata = _collect_runtime_metadata(
+            cwd=Path(args.cwd),
+            gemini_binary=args.gemini_binary,
+            turns=turns,
+        )
 
         _write_json(
             episode_dir / "metadata.json",
@@ -899,6 +985,7 @@ def _run_configured_episode(args: argparse.Namespace, *, execution_mode: str) ->
                 "task_name": task_spec.title,
                 "execution_mode": execution_mode,
                 "selected_helpers": selected_helpers,
+                "runtime_metadata": runtime_metadata,
                 "turns": turns,
             },
         )
@@ -1058,6 +1145,8 @@ def run_batch(args: argparse.Namespace) -> Path:
 
     analysis = analyze_batch(batch_root)
     _write_json(batch_root / "analysis.json", analysis)
+    if "audit" in analysis:
+        _write_json(batch_root / "audit.json", analysis["audit"])
     _save_batch_state(batch_root, state)
     _log(
         args.progress,
@@ -1153,6 +1242,10 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--freeze-path", default=str(DEFAULT_C2_FREEZE_PATH))
     analyze.add_argument("--write-freeze", action="store_true")
 
+    audit = subparsers.add_parser("audit-batch")
+    audit.add_argument("--batch-dir", required=True)
+    audit.add_argument("--write-path")
+
     plan = subparsers.add_parser("plan-study")
     plan.add_argument("--write-path")
     return parser
@@ -1174,6 +1267,12 @@ def main() -> None:
         _write_json(Path(args.batch_dir) / "analysis.json", analysis)
         if args.write_freeze:
             _write_json(Path(args.freeze_path), analysis["selection"])
+    elif args.command == "audit-batch":
+        audit = audit_batch(Path(args.batch_dir))
+        if args.write_path:
+            _write_json(Path(args.write_path), audit)
+        else:
+            _write_json(Path(args.batch_dir) / "audit.json", audit)
     elif args.command == "plan-study":
         summary = study_plan_summary()
         if args.write_path:

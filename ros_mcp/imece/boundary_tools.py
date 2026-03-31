@@ -46,6 +46,81 @@ def _allowed_service(service: str, service_type: str | None = None) -> str | Non
     return None
 
 
+def _compact_messages(messages: list[dict[str, Any]], *, limit: int = 3) -> list[dict[str, Any]]:
+    if len(messages) <= limit:
+        return messages
+    compact = [messages[0]]
+    compact.extend(messages[-(limit - 1) :])
+    return compact
+
+
+def _pose_summary(messages: list[dict[str, Any]]) -> dict[str, Any] | None:
+    samples: list[dict[str, float]] = []
+    for message in messages:
+        pose = message.get("pose", {}) if isinstance(message, dict) else {}
+        position = pose.get("position", {}) if isinstance(pose, dict) else {}
+        try:
+            samples.append(
+                {
+                    "x": float(position["x"]),
+                    "y": float(position["y"]),
+                    "z": float(position["z"]),
+                }
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+    if not samples:
+        return None
+    xs = [sample["x"] for sample in samples]
+    ys = [sample["y"] for sample in samples]
+    zs = [sample["z"] for sample in samples]
+    return {
+        "first_position": samples[0],
+        "last_position": samples[-1],
+        "x_span_m": max(xs) - min(xs),
+        "y_span_m": max(ys) - min(ys),
+        "z_span_m": max(zs) - min(zs),
+        "min_z": min(zs),
+        "max_z": max(zs),
+    }
+
+
+def _state_summary(messages: list[dict[str, Any]]) -> dict[str, Any] | None:
+    states = [message for message in messages if isinstance(message, dict)]
+    if not states:
+        return None
+    first = states[0]
+    last = states[-1]
+    return {
+        "first_mode": first.get("mode"),
+        "last_mode": last.get("mode"),
+        "first_armed": first.get("armed"),
+        "last_armed": last.get("armed"),
+        "first_connected": first.get("connected"),
+        "last_connected": last.get("connected"),
+    }
+
+
+def _subscription_payload(topic: str, messages: list[dict[str, Any]]) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "topic": topic,
+        "collected_count": len(messages),
+        "messages": _compact_messages(messages),
+    }
+    if messages:
+        payload["first_msg"] = messages[0]
+        payload["last_msg"] = messages[-1]
+    if topic == "/mavros/local_position/pose":
+        summary = _pose_summary(messages)
+        if summary is not None:
+            payload["summary"] = summary
+    elif topic == "/mavros/state":
+        summary = _state_summary(messages)
+        if summary is not None:
+            payload["summary"] = summary
+    return payload
+
+
 def register_filtered_topic_tools(mcp: FastMCP, ws_manager: WebSocketManager) -> None:
     @mcp.tool(
         description="Get the IMECE-approved ROS topics for local-pose control and state observation.",
@@ -167,7 +242,7 @@ def register_filtered_topic_tools(mcp: FastMCP, ws_manager: WebSocketManager) ->
             return {"error": "Timeout waiting for message from topic"}
 
     @mcp.tool(
-        description="Subscribe to an IMECE-approved topic for a fixed duration and collect messages.",
+        description="Subscribe to an IMECE-approved topic for a fixed duration and return a compact summary with first and last samples.",
         annotations=ToolAnnotations(title="Subscribe for Duration", readOnlyHint=True),
     )
     def subscribe_for_duration(
@@ -211,7 +286,7 @@ def register_filtered_topic_tools(mcp: FastMCP, ws_manager: WebSocketManager) ->
                     return {"error": message.get("msg", "Unknown rosbridge error")}
 
             ws_manager.send({"op": "unsubscribe", "topic": topic})
-            return {"topic": topic, "collected_count": len(collected), "messages": collected}
+            return _subscription_payload(topic, collected)
 
     @mcp.tool(
         description="Publish a single PoseStamped setpoint on /mavros/setpoint_position/local.",

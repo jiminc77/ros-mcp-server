@@ -17,6 +17,15 @@ These two preserved batches are the ones that should be cited when describing th
 
 Deleted ad hoc or superseded runs are intentionally not part of the preserved argument. The paper should not rely on removed intermediate batches.
 
+Each preserved batch now has two machine-generated summaries:
+
+- `analysis.json`
+  - helper selection and freeze review derived from the current scoring and failure taxonomy
+- `audit.json`
+  - fairness and reproducibility caveats for preserved artifacts, including historical interface mismatch and stored-vs-current task-success drift
+
+The preserved discovery batch predates top-level runtime metadata capture. The preserved targeted `C2:T3` validation batch includes complete episode-level `runtime_metadata` in `metadata.json`.
+
 ## 2. Current Study Snapshot
 
 The current preserved study shape is:
@@ -74,11 +83,12 @@ The actual `C1` condition artifact is [`config/imece/c1.md`](../../config/imece/
 
 `C2` was not designed first. It was frozen only after repeated discovery evidence showed that prompt context alone did not repair the remaining low-level transport and safety gaps.
 
-The frozen helper subset is stored in [`config/imece/c2_freeze.json`](../../config/imece/c2_freeze.json). The preserved frozen set is:
+The single source of truth for the frozen subset is the discovery selection in [`artifacts/imece/discovery-20260331/analysis.json`](../../artifacts/imece/discovery-20260331/analysis.json). [`config/imece/c2_freeze.json`](../../config/imece/c2_freeze.json) is a runtime mirror of that selection and is kept synchronized from the batch analysis output.
+
+The current frozen helper subset is:
 
 - `setpoint_relay`
 - `mode_guard`
-- `frame_guard`
 - `abort_watchdog`
 
 This selection is tied to repeated post-`C1` failure classes, not convenience:
@@ -89,12 +99,11 @@ This selection is tied to repeated post-`C1` failure classes, not convenience:
 - `mode_guard`
   - selected because `prestream -> OFFBOARD -> arm` ordering failures kept recurring
   - exposes only guarded offboard engage and guarded land
-- `frame_guard`
-  - selected because frame/sign mistakes kept recurring
-  - rejects obvious local-frame misuse rather than silently accepting it
 - `abort_watchdog`
   - selected because timeout and abort safety gaps were observed
   - forces `LAND` on timeout or lost runner heartbeat
+
+`frame_guard` remains implemented in the helper catalog, but the preserved discovery audit does not contain repeated explicit frame/sign failures under the current classifier. It is therefore not part of the currently frozen subset and should not be described as discovery-frozen evidence in the paper.
 
 No semantic helper such as `takeoff()`, `goto()`, `return_home()`, or `fly_square()` was added.
 
@@ -119,9 +128,14 @@ This matrix is exactly:
 The helper freeze decision recorded by the discovery analysis is in [`analysis.json`](../../artifacts/imece/discovery-20260331/analysis.json) and mirrored into [`config/imece/c2_freeze.json`](../../config/imece/c2_freeze.json). The preserved discovery selection counts are:
 
 - `F2 = 15`
-- `F3 = 3`
-- `F4 = 19`
+- `F4 = 18`
 - `F5 = 13`
+
+The preserved discovery audit is in [`audit.json`](../../artifacts/imece/discovery-20260331/audit.json). It matters for how the paper should phrase results:
+
+- `30` preserved discovery episodes contain historical generic-tool schema mismatch (`wait_for_previous` validation drift)
+- the current classifier finds `0` repeated explicit frame/sign errors in the preserved discovery tree
+- stored artifact labels should not be used blindly when current task rules differ; use the audit and current scoring summaries instead
 
 ### Representative C0 Failure
 
@@ -141,7 +155,7 @@ This is the raw `C0` picture: the agent could access the generic surface, but re
 
 `C1/T1/episode-01` shows the right qualitative pattern for the staged argument. See [`metrics.json`](../../artifacts/imece/discovery-20260331/C1/T1/episode-01/metrics.json):
 
-- `task_success = true`
+- `task_success_current_spec = true`
 - `failure_codes = ["F2", "F4", "F5"]`
 - `max_altitude_m = 1.9835`
 - `max_setpoint_gap_s = 10.14`
@@ -156,6 +170,15 @@ The discovery rationale is stronger when the qualitative trace is considered. In
 
 - `C1` improved reasoning
 - `C1` did not repair the mechanism itself
+
+The paper should still be conservative here. Because the discovery audit flags widespread historical interface mismatch, the safe claim is qualitative and failure-class based, not “prompt-only success rate improved by X points.”
+
+The implementation used for future `official_sim` runs stabilizes that shared generic surface in two narrow ways:
+
+- generic tools tolerate stray `wait_for_previous` fields instead of failing on schema drift
+- `subscribe_for_duration` returns a compact payload with `first_msg`, `last_msg`, and `summary` instead of dumping the full message window into the model context
+
+These changes do not rewrite the preserved discovery evidence. They exist so that `official_sim` starts from a stable common interface across `C0`, `C1`, and `C2`.
 
 ### Representative T3 Square Failure Before C2 Validation
 
@@ -190,10 +213,24 @@ Its validation result is in [`analysis.json`](../../artifacts/imece/c2-freeze-t3
 - `freeze_review.task_success.T3.success = 5`
 - `freeze_review.task_success.T3.total = 5`
 
+Its reproducibility audit is in [`audit.json`](../../artifacts/imece/c2-freeze-t3-20260331/audit.json):
+
+- `episodes_with_runtime_metadata = 5`
+- `episodes_missing_runtime_metadata = []`
+- `field_coverage` includes repo commit, PX4 commit, Gemini CLI version, routed model, MAVROS version, Gazebo version, and ROS distro
+
 This preserved batch exists because the final unresolved gap after the task-set update was the square-pattern task. The preserved conclusion is therefore:
 
 - discovery justified the frozen `C2` helper subset
 - the remaining `T3` square-pattern gap was then validated separately under that frozen subset
+
+This is the current paper-safe stopping point. The preserved evidence supports:
+
+- discovery justified why a frozen `C2` layer was needed at all
+- the final frozen subset is `setpoint_relay`, `mode_guard`, `abort_watchdog`
+- the remaining `T3` gap was validated separately as `5/5` under that frozen subset
+
+The preserved evidence does not yet support the stronger claim that `C2` has already been fully validated across the entire final `T1-T4` task set.
 
 The paper should describe this honestly. The preserved artifact tree currently contains:
 
@@ -201,6 +238,8 @@ The paper should describe this honestly. The preserved artifact tree currently c
 - one preserved `C2:T3` validation batch for the updated square-pattern task
 
 It does not currently contain a single newly generated `C2` validation directory covering `T1-T4` together under the current task map. If that exact shape is needed later for presentation symmetry, it should be generated as a new preserved batch rather than reconstructed from deleted intermediates.
+
+Operationally, the study is now ready to proceed to `official_sim`. The reason is narrower than “full `C2` validation”: discovery justified the frozen helper subset, and the only remaining final-task gap after the task-map update was `T3`, which is now preserved as a separate `5/5` targeted validation batch under that frozen subset.
 
 ## 6. Current Prompt Assembly Rule
 
@@ -259,8 +298,11 @@ The current canonical task prompts come from [`ros_mcp/imece/config.py`](../../r
   - do not assume the start is exactly the world origin
   - keep the square axis-aligned in local `ENU`
   - use exactly five motion targets
+  - read verification from `last_msg.pose.position` or `summary.last_position`
   - only advance after the current pose is near the active target
-  - refuse rather than skip ahead if the current target is still not reached after one refresh and re-check
+  - use at most two verification windows per target
+  - refuse rather than skip ahead if the current target is still not reached after the second verification window
+  - after landing, emit exactly `DONE: square complete`
 - diagnostic role:
   - repeated local-pose target sequencing without semantic mission support
 

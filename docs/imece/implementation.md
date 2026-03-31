@@ -74,6 +74,11 @@ The study does not expose the full ROS graph to the agent. It exposes an IMECE-s
 | Services | `/mavros/set_mode`, `/mavros/cmd/arming` | `/mavros/cmd/takeoff`, `/mavros/cmd/land`, and other MAVROS services | removes semantic shortcuts and preserves the need to reason about mode ordering and arming |
 | Generic tool families | topic and service introspection, subscribe, publish, call | actions, nodes, parameters, robot spec tools, image tools | removes unrelated surface area that would weaken attribution of failures |
 
+The current shared interface used for future `official_sim` runs is stabilized in two narrow, non-semantic ways:
+
+- generic tools tolerate stray `wait_for_previous` fields instead of failing on schema drift
+- `subscribe_for_duration` returns a compact payload with `first_msg`, `last_msg`, and `summary` so the model can verify state without ingesting a full raw message dump
+
 The boundary was chosen to preserve three properties:
 
 - task sufficiency: the agent can still complete `T1-T4` using ROS-level primitives only
@@ -120,6 +125,14 @@ This boundary is shared by `C0` and `C1`. `C2` keeps the same generic boundary a
   - enforces the minimum safe order: prestream -> `OFFBOARD` -> arm -> `LAND`
 - `abort_watchdog`
   - triggers `LAND` on timeout or abort path
+
+The helper catalog is larger than the currently frozen subset. The preserved discovery analysis currently freezes:
+
+- `setpoint_relay`
+- `mode_guard`
+- `abort_watchdog`
+
+`frame_guard` remains implemented but is not part of the current frozen subset because the preserved discovery audit does not show repeated explicit frame/sign failures under the current classifier.
 
 ### Forbidden Helper Behavior
 
@@ -288,6 +301,11 @@ Promote only the lowest-support condition that satisfies all of the following:
 - the current real-flight automation boundary is therefore:
   - automate prompt construction, Gemini session execution, logging, and metrics capture
   - keep operator go/no-go, airspace confirmation, and takeover readiness manual
+- the runner loads missing variables from the repo-local `.env` file before launching Gemini CLI, so `GEMINI_API_KEY=...` may be supplied through `.env`
+- the current preserved evidence is sufficient to start `official_sim` if it is described honestly:
+  - discovery justifies the frozen `C2` subset
+  - preserved targeted validation confirms the remaining `T3` gap under that subset
+  - this is not the same claim as “full `C2` validation across all of `T1-T4`”
 
 ## 8. Metrics and Metadata
 
@@ -319,6 +337,10 @@ Promote only the lowest-support condition that satisfies all of the following:
 - ros-mcp version or commit
 - PX4, MAVROS, and Gazebo revision information
 
+These are stored at episode scope under `metadata.json` as `runtime_metadata`. Batch scope caveats are written to `analysis.json` and `audit.json`.
+
+Preserved discovery artifacts predate this metadata capture. Their missing fields are surfaced in `audit.json` under `reproducibility_metadata` and should be described as a limitation rather than backfilled.
+
 ## 9. Procedure and Safety
 
 ### Episode Procedure
@@ -345,6 +367,7 @@ Promote only the lowest-support condition that satisfies all of the following:
 - position, attitude, battery, and mode history
 - operator abort or takeover flag
 - watchdog-triggered land events
+- batch-level `analysis.json` and `audit.json` for current-scoring summaries, helper selection, historical interface mismatch, and stored-vs-current label drift
 
 ### Real-flight Safety
 

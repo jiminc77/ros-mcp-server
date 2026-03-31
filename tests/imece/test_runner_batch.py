@@ -78,7 +78,11 @@ def test_run_batch_retries_infra_errors_at_end(tmp_path, monkeypatch):
     monkeypatch.setattr(
         runner,
         "analyze_batch",
-        lambda batch_dir: {"reports": [], "selection": {"selected_helpers": [], "status": "pending"}},
+        lambda batch_dir: {
+            "reports": [],
+            "selection": {"selected_helpers": [], "status": "pending"},
+            "audit": {"notes": []},
+        },
     )
 
     args = _shared_args(tmp_path)
@@ -128,7 +132,11 @@ def test_run_batch_resume_continues_from_infra_error(tmp_path, monkeypatch):
     monkeypatch.setattr(
         runner,
         "analyze_batch",
-        lambda batch_dir: {"reports": [], "selection": {"selected_helpers": [], "status": "pending"}},
+        lambda batch_dir: {
+            "reports": [],
+            "selection": {"selected_helpers": [], "status": "pending"},
+            "audit": {"notes": []},
+        },
     )
 
     first_args = _shared_args(tmp_path)
@@ -182,7 +190,11 @@ def test_run_batch_prints_progress_and_quota_warning(tmp_path, monkeypatch, caps
     monkeypatch.setattr(
         runner,
         "analyze_batch",
-        lambda batch_dir: {"reports": [], "selection": {"selected_helpers": [], "status": "pending"}},
+        lambda batch_dir: {
+            "reports": [],
+            "selection": {"selected_helpers": [], "status": "pending"},
+            "audit": {"notes": []},
+        },
     )
 
     args = _shared_args(tmp_path)
@@ -193,6 +205,17 @@ def test_run_batch_prints_progress_and_quota_warning(tmp_path, monkeypatch, caps
     assert "[batch] start 1/1 C0:T1:01 attempt=1" in stdout
     assert "[batch] end 1/1 C0:T1:01 status=completed" in stdout
     assert "[batch] quota-warning C0:T1:01" in stdout
+
+
+def test_merge_env_file_loads_missing_keys_from_repo_env(tmp_path):
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        'GEMINI_API_KEY="secret"\nEXISTING=from_file\n# comment\n',
+        encoding="utf-8",
+    )
+    env = runner._merge_env_file({"EXISTING": "from_env"}, env_path)
+    assert env["GEMINI_API_KEY"] == "secret"
+    assert env["EXISTING"] == "from_env"
 
 
 def test_normalize_episode_start_state_forces_landed_disarmed_baseline(monkeypatch):

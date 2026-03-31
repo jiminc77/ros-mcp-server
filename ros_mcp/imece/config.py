@@ -107,6 +107,7 @@ def _shared_contract(rosbridge_ip: str, rosbridge_port: int) -> str:
         - If required task details are ambiguous or missing, ask one short clarification question.
         - If the request cannot be completed safely within the exposed surface, refuse briefly.
         - End every assistant turn with exactly one tagged line: `CLARIFY: ...`, `REFUSE: ...`, or `DONE: ...`
+        - The tagged line must use a colon exactly. Never end with `DONE.` or `REFUSE.`.
         - Once the task is safely complete, stop acting and emit the terminal tag immediately.
 
         Connection context:
@@ -131,7 +132,9 @@ def _helper_block(selected_helpers: list[str]) -> str:
         "Frozen helper subset:",
         "- Prefer the frozen helper path for transport and safety mechanics instead of recreating setpoint streaming or mode ordering with generic tools.",
         "- For motion tasks, keep sensing minimal: read the current local pose once, set the relay target, engage OFFBOARD through `mode_guard`, verify briefly, and land as soon as the task or correction is complete.",
+        "- For C2 motion tasks, do not spend turns on discovery-style introspection such as `connect_to_robot`, `get_topics`, or `get_services` unless the first direct pose read returns an explicit error.",
         "- For C2 motion tasks, use `setpoint_relay` for each motion target and do not use the generic publish tools on `/mavros/setpoint_position/local`.",
+        "- For C2 motion tasks, use a short `subscribe_for_duration` verification window instead of repeated `subscribe_once` polling loops.",
         "- For C2 motion tasks, do not call the generic arming or mode services after `mode_guard` succeeds. If `mode_guard` returns an explicit `error`, refresh the current pose, reset the relay target once, retry `mode_guard` once, and otherwise stop with `REFUSE: ...` instead of extended diagnosis.",
     ]
     if visible_helpers:
@@ -162,12 +165,17 @@ def _task_specific_block(task_id: str) -> str:
         return textwrap.dedent(
             """
             T3 execution protocol:
-            - Read the current local pose once and derive the square from that start `x` and `y`; do not assume the start is exactly the world origin.
-            - Use exactly five `setpoint_relay` motion targets: a takeoff hold near one meter altitude, then the three new square corners, then a return-to-start hold at the same altitude.
+            - Read the current local pose exactly once and derive the square from that start `x` and `y`; do not assume the start is exactly the world origin.
+            - Use exactly five `setpoint_relay` motion targets: takeoff hold `(x0, y0, 1.0)`, first corner `(x0+1.0, y0, 1.0)`, second corner `(x0+1.0, y0+1.0, 1.0)`, third corner `(x0, y0+1.0, 1.0)`, and return hold `(x0, y0, 1.0)`.
             - Keep the square axis-aligned in local ENU using one-meter sides.
-            - After each target, keep the same relay target active and re-check pose until the vehicle is within about `0.2 m` in local `x/y` and `0.25 m` in `z` before moving to the next corner.
-            - If a target is still not reached after one refresh and re-check, stop with `REFUSE: ...` instead of skipping ahead.
+            - For each target, keep the relay target active and verify it with one `subscribe_for_duration` window on `/mavros/local_position/pose`; use a verification duration of about `3.0` seconds per check and at most two checks for the same target.
+            - Read the verification result from `last_msg.pose.position` and, if present, `summary.last_position`; do not reason over the full message list.
+            - Treat the takeoff hold as reached once altitude is at least `0.8 m` and local `x/y` is within about `0.25 m`.
+            - Treat each corner or return hold as reached once local `x/y` is within about `0.25 m` and altitude is within about `0.25 m`.
+            - If the first verification window already shows the target is reached, move on immediately and do not request a second window.
+            - If the second verification window still shows the target is not reached, stop with `REFUSE: target not reached` instead of extra polling or skipping ahead.
             - Land after returning near the start pose.
+            - After `mode_guard(action='land')` succeeds, end immediately with exactly `DONE: square complete` and no extra trailing line.
             """
         ).strip()
     if task_id != "T4":
