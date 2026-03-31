@@ -72,8 +72,8 @@ LAND_MODE = "AUTO.LAND"
 TERMINAL_TAGS = ("CLARIFY", "REFUSE", "DONE")
 
 HELPER_PROMPT_DESCRIPTIONS = {
-    "setpoint_relay": "maintains the last valid local `PoseStamped` target at `20 Hz` on `/mavros/setpoint_position/local`",
+    "setpoint_relay": "maintains the last valid local `PoseStamped` target at `20 Hz` on `/mavros/setpoint_position/local`; calling it again immediately replaces the active target and can be used to hold the current pose after a correction",
     "frame_guard": "rejects obvious `ENU` frame or sign mistakes before accepting a relay target",
-    "mode_guard": "enforces the guarded order `prestream -> OFFBOARD -> arm` and exposes `LAND` mode",
+    "mode_guard": "enforces the guarded order `prestream -> OFFBOARD -> arm`; use `action='land'` to command `AUTO.LAND` and wait for a safe landing",
     "abort_watchdog": "commands `AUTO.LAND` if the runner heartbeat stops or an abort flag is raised",
 }

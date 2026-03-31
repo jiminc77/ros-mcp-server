@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import threading
 import time
@@ -16,7 +17,7 @@ from .constants import (
     SET_MODE_SERVICE,
     SET_MODE_SERVICE_TYPE,
 )
-from .rosbridge import RosbridgeRequester
+from .rosbridge import RosbridgeRequester, RosbridgeSubscriber
 
 
 class PoseRelay:
@@ -45,13 +46,20 @@ class PoseRelay:
         self.last_error: str | None = None
 
     def _normalize_target(self, target: dict[str, Any]) -> dict[str, Any]:
+        target = self._coerce_mapping(target, field_name="target")
         if not isinstance(target, dict):
             raise ValueError("target must be a PoseStamped-like dictionary")
 
-        header = dict(target.get("header") or {})
-        pose = dict(target.get("pose") or {})
-        position = dict(pose.get("position") or {})
-        orientation = dict(pose.get("orientation") or {})
+        header = self._coerce_mapping(target.get("header") or {}, field_name="target.header")
+        pose = self._coerce_mapping(target.get("pose") or {}, field_name="target.pose")
+        position = self._coerce_mapping(
+            pose.get("position") or {},
+            field_name="target.pose.position",
+        )
+        orientation = self._coerce_mapping(
+            pose.get("orientation") or {},
+            field_name="target.pose.orientation",
+        )
 
         try:
             x = float(position["x"])
@@ -85,6 +93,25 @@ class PoseRelay:
                 },
             },
         }
+
+    @staticmethod
+    def _coerce_mapping(value: Any, *, field_name: str) -> dict[str, Any]:
+        if isinstance(value, dict):
+            return dict(value)
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return {}
+            try:
+                decoded = json.loads(stripped)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"{field_name} must be a mapping or JSON object string") from exc
+            if not isinstance(decoded, dict):
+                raise ValueError(f"{field_name} must decode to a mapping")
+            return dict(decoded)
+        if value is None:
+            return {}
+        raise ValueError(f"{field_name} must be a mapping")
 
     def set_target(self, target: dict[str, Any]) -> dict[str, Any]:
         normalized = self._normalize_target(target)
@@ -169,14 +196,54 @@ class ModeGuard:
         }
 
     def land(self) -> dict[str, Any]:
+        self.relay.stop()
+        mode_result = self.requester.call_service(
+            SET_MODE_SERVICE,
+            SET_MODE_SERVICE_TYPE,
+            {"base_mode": 0, "custom_mode": LAND_MODE},
+            timeout=5.0,
+        )
+
+        landing_state: dict[str, Any] = {"armed": None, "z": None}
+        subscriber = RosbridgeSubscriber(self.requester.host, self.requester.port, timeout=1.0)
+
+        def on_state(message: dict[str, Any]) -> None:
+            landing_state["armed"] = message.get("armed")
+
+        def on_pose(message: dict[str, Any]) -> None:
+            pose = message.get("pose", {})
+            position = pose.get("position", {}) if isinstance(pose, dict) else {}
+            try:
+                landing_state["z"] = float(position.get("z"))
+            except (TypeError, ValueError):
+                return
+
+        landed = False
+        try:
+            subscriber.subscribe("/mavros/state", "mavros_msgs/msg/State", on_state)
+            subscriber.subscribe(
+                "/mavros/local_position/pose",
+                "geometry_msgs/msg/PoseStamped",
+                on_pose,
+            )
+
+            deadline = time.monotonic() + 20.0
+            while time.monotonic() < deadline:
+                armed = landing_state.get("armed")
+                altitude = landing_state.get("z")
+                if armed is False and altitude is not None and altitude <= 0.2:
+                    landed = True
+                    break
+                time.sleep(0.1)
+        finally:
+            subscriber.stop()
+
         return {
             "action": "land",
-            "mode_result": self.requester.call_service(
-                SET_MODE_SERVICE,
-                SET_MODE_SERVICE_TYPE,
-                {"base_mode": 0, "custom_mode": LAND_MODE},
-                timeout=5.0,
-            ),
+            "mode_result": mode_result,
+            "landing_complete": landed,
+            "latest_armed": landing_state.get("armed"),
+            "latest_z": landing_state.get("z"),
         }
 
 

@@ -96,6 +96,7 @@ def _shared_contract(rosbridge_ip: str, rosbridge_port: int) -> str:
         - If required task details are ambiguous or missing, ask one short clarification question.
         - If the request cannot be completed safely within the exposed surface, refuse briefly.
         - End every assistant turn with exactly one tagged line: `CLARIFY: ...`, `REFUSE: ...`, or `DONE: ...`
+        - Once the task is safely complete, stop acting and emit the terminal tag immediately.
 
         Connection context:
         - ROS bridge websocket: `ws://{rosbridge_ip}:{rosbridge_port}`

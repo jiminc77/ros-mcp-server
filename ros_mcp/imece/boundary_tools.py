@@ -51,7 +51,8 @@ def register_filtered_topic_tools(mcp: FastMCP, ws_manager: WebSocketManager) ->
         description="Get the IMECE-approved ROS topics for local-pose control and state observation.",
         annotations=ToolAnnotations(title="Get Topics", readOnlyHint=True),
     )
-    def get_topics() -> dict:
+    def get_topics(wait_for_previous: bool | None = None) -> dict:
+        del wait_for_previous
         response = _rosapi_call(ws_manager, "/rosapi/topics", {})
         values = response.get("values", {}) if isinstance(response, dict) else {}
         topics = values.get("topics", [])
@@ -68,7 +69,8 @@ def register_filtered_topic_tools(mcp: FastMCP, ws_manager: WebSocketManager) ->
         description="Get the type for an IMECE-approved ROS topic.",
         annotations=ToolAnnotations(title="Get Topic Type", readOnlyHint=True),
     )
-    def get_topic_type(topic: str) -> dict:
+    def get_topic_type(topic: str, wait_for_previous: bool | None = None) -> dict:
+        del wait_for_previous
         error = _allowed_topic(topic)
         if error:
             return {"error": error}
@@ -78,7 +80,8 @@ def register_filtered_topic_tools(mcp: FastMCP, ws_manager: WebSocketManager) ->
         description="Get details for an IMECE-approved ROS topic.",
         annotations=ToolAnnotations(title="Get Topic Details", readOnlyHint=True),
     )
-    def get_topic_details(topic: str) -> dict:
+    def get_topic_details(topic: str, wait_for_previous: bool | None = None) -> dict:
+        del wait_for_previous
         error = _allowed_topic(topic)
         if error:
             return {"error": error}
@@ -98,7 +101,11 @@ def register_filtered_topic_tools(mcp: FastMCP, ws_manager: WebSocketManager) ->
         description="Get the structure for an IMECE-approved message type.",
         annotations=ToolAnnotations(title="Get Message Details", readOnlyHint=True),
     )
-    def get_message_details(message_type: str) -> dict:
+    def get_message_details(
+        message_type: str,
+        wait_for_previous: bool | None = None,
+    ) -> dict:
+        del wait_for_previous
         if message_type not in set(ALLOWED_TOPIC_TYPES.values()):
             return {"error": f"Message type {message_type} is outside the IMECE control surface"}
         response = _rosapi_call(ws_manager, "/rosapi/message_details", {"type": message_type})
@@ -123,7 +130,9 @@ def register_filtered_topic_tools(mcp: FastMCP, ws_manager: WebSocketManager) ->
         timeout: float = 5.0,
         queue_length: int = 1,
         throttle_rate_ms: int = 0,
+        wait_for_previous: bool | None = None,
     ) -> dict:
+        del wait_for_previous
         error = _allowed_topic(topic, msg_type)
         if error:
             return {"error": error}
@@ -168,7 +177,9 @@ def register_filtered_topic_tools(mcp: FastMCP, ws_manager: WebSocketManager) ->
         max_messages: int = 100,
         queue_length: int = 1,
         throttle_rate_ms: int = 0,
+        wait_for_previous: bool | None = None,
     ) -> dict:
+        del wait_for_previous
         error = _allowed_topic(topic, msg_type)
         if error:
             return {"error": error}
@@ -206,7 +217,13 @@ def register_filtered_topic_tools(mcp: FastMCP, ws_manager: WebSocketManager) ->
         description="Publish a single PoseStamped setpoint on /mavros/setpoint_position/local.",
         annotations=ToolAnnotations(title="Publish Once", destructiveHint=True),
     )
-    def publish_once(topic: str = "", msg_type: str = "", msg: dict = {}) -> dict:
+    def publish_once(
+        topic: str = "",
+        msg_type: str = "",
+        msg: dict = {},
+        wait_for_previous: bool | None = None,
+    ) -> dict:
+        del wait_for_previous
         error = _allowed_topic(topic, msg_type, publish=True)
         if error:
             return {"error": error}
@@ -232,7 +249,9 @@ def register_filtered_topic_tools(mcp: FastMCP, ws_manager: WebSocketManager) ->
         msg_type: str = "",
         messages: list[dict] = [],
         durations: list[float] = [],
+        wait_for_previous: bool | None = None,
     ) -> dict:
+        del wait_for_previous
         error = _allowed_topic(topic, msg_type, publish=True)
         if error:
             return {"error": error}
@@ -261,7 +280,8 @@ def register_filtered_service_tools(mcp: FastMCP, ws_manager: WebSocketManager) 
         description="Get the IMECE-approved ROS services for mode and arming control.",
         annotations=ToolAnnotations(title="Get Services", readOnlyHint=True),
     )
-    def get_services() -> dict:
+    def get_services(wait_for_previous: bool | None = None) -> dict:
+        del wait_for_previous
         response = _rosapi_call(ws_manager, "/rosapi/services", {})
         values = response.get("values", {}) if isinstance(response, dict) else {}
         services = [service for service in values.get("services", []) if service in ALLOWED_SERVICES]
@@ -271,7 +291,8 @@ def register_filtered_service_tools(mcp: FastMCP, ws_manager: WebSocketManager) 
         description="Get the type for an IMECE-approved ROS service.",
         annotations=ToolAnnotations(title="Get Service Type", readOnlyHint=True),
     )
-    def get_service_type(service: str) -> dict:
+    def get_service_type(service: str, wait_for_previous: bool | None = None) -> dict:
+        del wait_for_previous
         error = _allowed_service(service)
         if error:
             return {"error": error}
@@ -281,7 +302,8 @@ def register_filtered_service_tools(mcp: FastMCP, ws_manager: WebSocketManager) 
         description="Get details for an IMECE-approved ROS service.",
         annotations=ToolAnnotations(title="Get Service Details", readOnlyHint=True),
     )
-    def get_service_details(service: str) -> dict:
+    def get_service_details(service: str, wait_for_previous: bool | None = None) -> dict:
+        del wait_for_previous
         error = _allowed_service(service)
         if error:
             return {"error": error}
@@ -327,7 +349,9 @@ def register_filtered_service_tools(mcp: FastMCP, ws_manager: WebSocketManager) 
         service_type: str,
         request: dict,
         timeout: float = 5.0,
+        wait_for_previous: bool | None = None,
     ) -> dict:
+        del wait_for_previous
         error = _allowed_service(service_name, service_type)
         if error:
             return {"error": error}

@@ -112,6 +112,49 @@ def select_c2_helpers(episode_reports: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def review_c2_freeze_batch(episode_reports: list[dict[str, Any]]) -> dict[str, Any]:
+    c2_reports = [report for report in episode_reports if report.get("condition") == "C2"]
+    if not c2_reports:
+        return {
+            "status": "not_applicable",
+            "helper_change_request": [],
+            "reasoning": [],
+            "counts": {},
+            "task_success": {},
+        }
+
+    failure_counts = Counter(code for report in c2_reports for code in report.get("failure_codes", []))
+    task_success = {
+        task_id: {
+            "success": sum(
+                1 for report in c2_reports if report.get("task_id") == task_id and report.get("task_success")
+            ),
+            "total": sum(1 for report in c2_reports if report.get("task_id") == task_id),
+        }
+        for task_id in sorted({str(report.get("task_id")) for report in c2_reports})
+    }
+
+    reasoning: list[str] = []
+    if any(not report.get("task_success") for report in c2_reports):
+        reasoning.append("C2 freeze batch still has task failures, so official_sim should not start yet")
+    if failure_counts.get("F2", 0):
+        reasoning.append("Observed F2 during C2; fix tool-call compatibility before the next freeze pass")
+    if failure_counts.get("F4", 0):
+        reasoning.append("Observed residual F4 during C2; retain the relay and guarded OFFBOARD path")
+    if failure_counts.get("F3", 0):
+        reasoning.append("Observed at least one C2 frame/message fault; keep frame_guard active")
+    if failure_counts.get("F5", 0):
+        reasoning.append("Observed timeout/watchdog events during C2; tighten completion and landing behavior")
+
+    return {
+        "status": "validated" if all(report.get("task_success") for report in c2_reports) else "issues_found",
+        "helper_change_request": [],
+        "reasoning": reasoning,
+        "counts": dict(failure_counts),
+        "task_success": task_success,
+    }
+
+
 def analyze_batch(batch_dir: Path) -> dict[str, Any]:
     reports: list[dict[str, Any]] = []
     for metrics_path in sorted(batch_dir.rglob("metrics.json")):
@@ -123,4 +166,5 @@ def analyze_batch(batch_dir: Path) -> dict[str, Any]:
             json.dump(report, handle, indent=2, sort_keys=True)
             handle.write("\n")
     selection = select_c2_helpers(reports)
-    return {"reports": reports, "selection": selection}
+    freeze_review = review_c2_freeze_batch(reports)
+    return {"reports": reports, "selection": selection, "freeze_review": freeze_review}

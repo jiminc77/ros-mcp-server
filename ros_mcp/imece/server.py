@@ -23,7 +23,8 @@ def _register_detect_ros_version_tool(mcp: FastMCP, ws_manager: WebSocketManager
         description="Detect the ROS version and distribution via rosbridge.",
         annotations=ToolAnnotations(title="Detect ROS Version", readOnlyHint=True),
     )
-    def detect_ros_version() -> dict:
+    def detect_ros_version(wait_for_previous: bool | None = None) -> dict:
+        del wait_for_previous
         ros2_request = {
             "op": "call_service",
             "id": "imece_ros2_version_check",
@@ -94,7 +95,7 @@ def build_mcp() -> FastMCP:
 
             @mcp.tool(
                 description=(
-                    "Guarded mode helper. Use action='engage_offboard' after setpoint_relay or action='land' to command AUTO.LAND."
+                    "Guarded mode helper. Use action='engage_offboard' after setpoint_relay or action='land' to command AUTO.LAND and wait for a safe landing."
                 ),
                 annotations=ToolAnnotations(title="Mode Guard", destructiveHint=True),
             )
