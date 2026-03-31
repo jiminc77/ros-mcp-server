@@ -1,0 +1,19 @@
+{
+  "counts": {
+    "F2": 2,
+    "F4": 2,
+    "F5": 2
+  },
+  "reasoning": [
+    "setpoint_relay enabled after 2 post-C1 streaming/timing failures",
+    "mode_guard enabled after 2 post-C1 mode-transition failures",
+    "abort_watchdog enabled after at least one post-C1 unsafe timeout/abort event"
+  ],
+  "selected_helpers": [
+    "setpoint_relay",
+    "mode_guard",
+    "abort_watchdog"
+  ],
+  "source": "discovery_batch_analysis",
+  "status": "frozen"
+}

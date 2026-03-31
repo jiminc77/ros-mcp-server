@@ -176,6 +176,7 @@ pyrightconfig.json
 # .vscode
 .vscode/
 .vs/
+.gemini/
 
 # camera
 camera/*

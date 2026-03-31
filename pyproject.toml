@@ -31,6 +31,8 @@ dev = [
 
 [project.scripts]
 ros-mcp = "ros_mcp.main:main"
+ros-mcp-imece = "ros_mcp.imece.server:main"
+ros-mcp-imece-runner = "ros_mcp.imece.runner:main"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
@@ -38,9 +40,20 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 include-package-data = true
-packages = ["ros_mcp", "ros_mcp.tools", "ros_mcp.utils", "ros_mcp.prompts", "ros_mcp.resources", "config", "robot_specifications"]
+packages = [
+    "ros_mcp",
+    "ros_mcp.tools",
+    "ros_mcp.utils",
+    "ros_mcp.prompts",
+    "ros_mcp.resources",
+    "ros_mcp.imece",
+    "config",
+    "config.imece",
+    "robot_specifications",
+]
 
 [tool.setuptools.package-data]
+config = ["*.json", "imece/*.json", "imece/*.md", "imece/*.toml"]
 robot_specifications = ["*.yaml"]
 
 [tool.setuptools.data-files]
