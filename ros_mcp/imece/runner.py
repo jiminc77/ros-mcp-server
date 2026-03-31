@@ -77,10 +77,10 @@ STUDY_PHASES = {
     "c2_freeze": StudyPhaseSpec(
         name="c2_freeze",
         conditions=("C2",),
-        tasks=("T1", "T2", "T4"),
+        tasks=("T1", "T2", "T3", "T4"),
         repetitions=5,
         automated=True,
-        note="One complete pilot batch after helper changes; add 15 episodes for each extra freeze-validation batch.",
+        note="One complete pilot batch after helper changes; add 20 episodes for each extra freeze-validation batch.",
     ),
     "official_sim": StudyPhaseSpec(
         name="official_sim",
@@ -166,7 +166,7 @@ def study_plan_summary() -> dict[str, Any]:
         "extra_c2_freeze_batch_cost": phases["c2_freeze"]["episode_count"],
         "notes": [
             "Discovery is 2 conditions x 4 tasks x 5 reps = 40 episodes.",
-            "One C2 freeze-validation batch is 1 condition x 3 tasks x 5 reps = 15 episodes.",
+            "One C2 freeze-validation batch is 1 condition x 4 tasks x 5 reps = 20 episodes.",
             "Official simulation is 3 conditions x 4 tasks x 10 reps = 120 episodes.",
             "Official real-flight is 1 promoted condition x 2 tasks x 5 reps = 10 episodes.",
         ],

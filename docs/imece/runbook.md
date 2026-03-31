@@ -79,10 +79,10 @@ uv run python -m ros_mcp.imece.runner plan-study
 This prints the official episode counts from the experiment specification, including:
 
 - discovery: `40`
-- one `C2` freeze-validation batch: `15`
+- one `C2` freeze-validation batch: `20`
 - official simulation: `120`
 - official real-flight: `10`
-- fixed total with one `C2` freeze batch: `185`
+- fixed total with one `C2` freeze batch: `190`
 
 ## Retry and resume behavior
 

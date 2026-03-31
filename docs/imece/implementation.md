@@ -227,7 +227,8 @@ This boundary is shared by `C0` and `C1`. `C2` keeps the same generic boundary a
 ### C2 Freeze Rule
 
 - helper selection changes only between pilot batches
-- the `C2` subset is frozen once one complete pilot batch of `T1`, `T2`, and `T4` with `5` repetitions each produces no helper change request
+- once `T3` was promoted to the square-pattern task, the `C2` confirmation batch also had to cover `T3`
+- the `C2` subset is frozen once one complete pilot batch of `T1-T4` with `5` repetitions each produces no helper change request
 
 ### Official Simulation Evaluation
 

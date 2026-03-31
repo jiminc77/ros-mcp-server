@@ -34,11 +34,11 @@ def _shared_args(tmp_path: Path) -> Namespace:
 def test_study_plan_summary_matches_spec_counts():
     summary = runner.study_plan_summary()
     assert summary["phases"]["discovery"]["episode_count"] == 40
-    assert summary["phases"]["c2_freeze"]["episode_count"] == 15
+    assert summary["phases"]["c2_freeze"]["episode_count"] == 20
     assert summary["phases"]["official_sim"]["episode_count"] == 120
     assert summary["phases"]["official_real"]["episode_count"] == 10
-    assert summary["simulation_total_before_real"] == 175
-    assert summary["fixed_total_with_one_c2_freeze_batch"] == 185
+    assert summary["simulation_total_before_real"] == 180
+    assert summary["fixed_total_with_one_c2_freeze_batch"] == 190
 
 
 def test_run_batch_retries_infra_errors_at_end(tmp_path, monkeypatch):

@@ -143,6 +143,8 @@ The next preserved artifact should therefore be the `c2_freeze` validation batch
 
 That next stage is where the paper should claim that `C2` repairs the specific low-level gap left by `C1`.
 
+The regenerated `T3` square-pattern discovery evidence does not currently justify a new helper class. It continues to fail through the same transport/timing and timeout modes already captured by `setpoint_relay`, `mode_guard`, and `abort_watchdog`. What it does change is the freeze-validation scope: because `T3` is now a core study task rather than the removed ambiguity probe, `c2_freeze` must also validate `T3`.
+
 ## 8. Experiment counts from the specification
 
 Fixed counts from `implementation.md`:
@@ -154,9 +156,9 @@ Fixed counts from `implementation.md`:
   - total: `2 x 4 x 5 = 40`
 - one `C2` freeze-validation batch
   - `C2`
-  - `T1`, `T2`, `T4`
+  - `T1-T4`
   - `5` repetitions each
-  - total: `1 x 3 x 5 = 15`
+  - total: `1 x 4 x 5 = 20`
 - official simulation
   - `C0`, `C1`, `C2`
   - `T1-T4`
@@ -170,10 +172,10 @@ Fixed counts from `implementation.md`:
 
 Fixed total with one `C2` freeze-validation batch:
 
-- simulation before real flight: `40 + 15 + 120 = 175`
-- including official real flight: `175 + 10 = 185`
+- simulation before real flight: `40 + 20 + 120 = 180`
+- including official real flight: `180 + 10 = 190`
 
-Each additional `C2` freeze-validation batch adds `15` more episodes.
+Each additional `C2` freeze-validation batch adds `20` more episodes.
 
 ## 9. Automation design
 
