@@ -119,7 +119,7 @@ This should be started only after documenting the preserved staged argument hone
 
 ```bash
 uv run python -m ros_mcp.imece.runner run-real-episode \
-  --condition C2 \
+  --condition <promoted_condition> \
   --task R1 \
   --episode-index 1 \
   --batch-id official-real-r1-001
