@@ -50,3 +50,17 @@ def test_shared_terminal_contract_is_present():
     assert "CLARIFY:" in prompt
     assert "REFUSE:" in prompt
     assert "DONE:" in prompt
+
+
+def test_t3_prompt_includes_staged_followup_protocol():
+    prompt = build_episode_prompt("C2", "T3", 1, "127.0.0.1", 9090, selected_helpers=["setpoint_relay"])
+    assert "Use exactly two motion targets in the first turn" in prompt
+    assert "Do not retarget for the halfway-forward motion until the current pose is near the takeoff hold" in prompt
+    assert "CLARIFY: awaiting correction" in prompt
+    assert "Come back." not in prompt
+
+
+def test_t2_prompt_includes_two_stage_motion_protocol():
+    prompt = build_episode_prompt("C2", "T2", 1, "127.0.0.1", 9090, selected_helpers=["setpoint_relay"])
+    assert "Use exactly two motion targets" in prompt
+    assert "Do not retarget for the forward motion until the current pose is near the takeoff hold" in prompt

@@ -14,7 +14,7 @@ from typing import Any, Callable
 
 from .constants import MCP_SERVER_NAME
 
-TERMINAL_RE = re.compile(r"(?:^|\n)(CLARIFY|REFUSE|DONE):\s*(.*)")
+TERMINAL_RE = re.compile(r"(?:^|\n)(CLARIFY|REFUSE|DONE)\s*:\s*(.*)")
 
 
 def parse_stream_event(line: str) -> dict[str, Any] | None:
@@ -193,7 +193,10 @@ class GeminiRunner:
                 result_status = "no_output"
 
         assistant_text = "".join(assistant_parts).strip()
+        terminal_scan_text = "\n".join(part for part in assistant_parts if part).strip()
         terminal_label, terminal_payload = extract_terminal_marker(assistant_text)
+        if terminal_label is None:
+            terminal_label, terminal_payload = extract_terminal_marker(terminal_scan_text)
         return GeminiTurnResult(
             session_id=session_id,
             assistant_text=assistant_text,

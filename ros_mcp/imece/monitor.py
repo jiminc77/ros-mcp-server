@@ -110,15 +110,6 @@ class FlightMonitor:
             self._setpoint_count += 1
         self._write_sample("setpoint", msg)
 
-    def horizontal_progress(self, target_distance_m: float = 1.0) -> float | None:
-        with self._lock:
-            if self._start_position is None or self._latest_position is None:
-                return None
-            dx = self._latest_position["x"] - self._start_position["x"]
-            dy = self._latest_position["y"] - self._start_position["y"]
-        distance = math.hypot(dx, dy)
-        return distance / target_distance_m if target_distance_m > 0 else None
-
     def snapshot(self) -> FlightMonitorSnapshot:
         with self._lock:
             if self._start_position is not None and self._latest_position is not None:

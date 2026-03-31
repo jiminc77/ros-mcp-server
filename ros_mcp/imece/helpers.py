@@ -114,7 +114,13 @@ class PoseRelay:
         raise ValueError(f"{field_name} must be a mapping")
 
     def set_target(self, target: dict[str, Any]) -> dict[str, Any]:
-        normalized = self._normalize_target(target)
+        try:
+            normalized = self._normalize_target(target)
+        except ValueError as exc:
+            self.last_error = str(exc)
+            status = self.status()
+            status["error"] = self.last_error
+            return status
         with self._lock:
             self._target = normalized
             self.last_error = None
@@ -161,7 +167,32 @@ class ModeGuard:
         self.requester = requester
         self.relay = relay
 
-    def engage_offboard(self, *, arm: bool = True, prestream_seconds: float = 1.0) -> dict[str, Any]:
+    @staticmethod
+    def _service_values(response: dict[str, Any] | None) -> dict[str, Any]:
+        if not isinstance(response, dict):
+            return {}
+        values = response.get("values")
+        return values if isinstance(values, dict) else {}
+
+    def _wait_for_mode(self, expected_mode: str, *, timeout_s: float = 3.0) -> bool:
+        observed = {"mode": None}
+        subscriber = RosbridgeSubscriber(self.requester.host, self.requester.port, timeout=1.0)
+
+        def on_state(message: dict[str, Any]) -> None:
+            observed["mode"] = message.get("mode")
+
+        try:
+            subscriber.subscribe("/mavros/state", "mavros_msgs/msg/State", on_state)
+            deadline = time.monotonic() + timeout_s
+            while time.monotonic() < deadline:
+                if observed.get("mode") == expected_mode:
+                    return True
+                time.sleep(0.1)
+        finally:
+            subscriber.stop()
+        return False
+
+    def engage_offboard(self, *, arm: bool = True, prestream_seconds: float = 2.0) -> dict[str, Any]:
         required_publishes = max(1, int(self.relay.rate_hz * prestream_seconds))
         deadline = time.monotonic() + max(2.0, prestream_seconds + 2.0)
         while self.relay.publish_count < required_publishes and time.monotonic() < deadline:
@@ -180,20 +211,50 @@ class ModeGuard:
             {"base_mode": 0, "custom_mode": OFFBOARD_MODE},
             timeout=5.0,
         )
+        mode_sent = bool(self._service_values(mode_result).get("mode_sent"))
+        if not mode_sent:
+            return {
+                "action": "engage_offboard",
+                "prestream_publishes": self.relay.publish_count,
+                "mode_result": mode_result,
+                "arming_result": None,
+                "arming_attempts": 0,
+                "error": "OFFBOARD mode change was not accepted",
+            }
+        if not self._wait_for_mode(OFFBOARD_MODE):
+            return {
+                "action": "engage_offboard",
+                "prestream_publishes": self.relay.publish_count,
+                "mode_result": mode_result,
+                "arming_result": None,
+                "arming_attempts": 0,
+                "error": "Vehicle did not report OFFBOARD state before arming",
+            }
+
         arming_result = None
+        arming_attempts = 0
         if arm:
-            arming_result = self.requester.call_service(
-                ARMING_SERVICE,
-                ARMING_SERVICE_TYPE,
-                {"value": True},
-                timeout=5.0,
-            )
-        return {
+            for _ in range(2):
+                arming_attempts += 1
+                arming_result = self.requester.call_service(
+                    ARMING_SERVICE,
+                    ARMING_SERVICE_TYPE,
+                    {"value": True},
+                    timeout=5.0,
+                )
+                if bool(self._service_values(arming_result).get("success")):
+                    break
+                time.sleep(0.5)
+        result = {
             "action": "engage_offboard",
             "prestream_publishes": self.relay.publish_count,
             "mode_result": mode_result,
             "arming_result": arming_result,
+            "arming_attempts": arming_attempts,
         }
+        if arm and not bool(self._service_values(arming_result).get("success")):
+            result["error"] = "Vehicle did not arm after OFFBOARD engage"
+        return result
 
     def land(self) -> dict[str, Any]:
         self.relay.stop()
@@ -238,13 +299,18 @@ class ModeGuard:
         finally:
             subscriber.stop()
 
-        return {
+        result = {
             "action": "land",
             "mode_result": mode_result,
             "landing_complete": landed,
             "latest_armed": landing_state.get("armed"),
             "latest_z": landing_state.get("z"),
         }
+        if not bool(self._service_values(mode_result).get("mode_sent")):
+            result["error"] = "AUTO.LAND mode change was not accepted"
+        elif not landed:
+            result["error"] = "Vehicle did not confirm a safe landing before timeout"
+        return result
 
 
 class AbortWatchdog:

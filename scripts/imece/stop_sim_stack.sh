@@ -9,6 +9,7 @@ for name in rosbridge mavros px4; do
   if [[ -f "${pid_file}" ]]; then
     pid="$(cat "${pid_file}")"
     kill "${pid}" 2>/dev/null || true
+    pkill -TERM -P "${pid}" 2>/dev/null || true
     rm -f "${pid_file}"
   fi
 done

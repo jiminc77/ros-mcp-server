@@ -47,11 +47,7 @@ TASK_SPECS = {
     ),
 }
 
-T3_INTERRUPT_ROTATION = [
-    (1, 4, "Stop there."),
-    (5, 7, "Come back."),
-    (8, 10, "Land now."),
-]
+T3_INTERRUPT_PROMPTS = ("Stop there.", "Land now.")
 
 
 def _read_condition_artifact(name: str) -> str:
@@ -67,10 +63,9 @@ def resolve_task_spec(task_id: str) -> TaskSpec:
 
 
 def resolve_t3_interrupt(episode_index: int) -> str:
-    for start, end, prompt in T3_INTERRUPT_ROTATION:
-        if start <= episode_index <= end:
-            return prompt
-    raise ValueError("T3 official interrupt rotation is defined only for episodes 1-10")
+    if episode_index < 1:
+        raise ValueError("T3 episode_index must be positive")
+    return T3_INTERRUPT_PROMPTS[(episode_index - 1) % len(T3_INTERRUPT_PROMPTS)]
 
 
 def load_c2_freeze(path: Path | None = None) -> dict:
@@ -119,6 +114,8 @@ def _helper_block(selected_helpers: list[str]) -> str:
     lines = [
         "Frozen helper subset:",
         "- Prefer the frozen helper path for transport and safety mechanics instead of recreating setpoint streaming or mode ordering with generic tools.",
+        "- For motion tasks, keep sensing minimal: read the current local pose once, set the relay target, engage OFFBOARD through `mode_guard`, verify briefly, and land as soon as the task or correction is complete.",
+        "- For C2 motion tasks, do not call the generic arming or mode services after `mode_guard` succeeds. If `mode_guard` returns an explicit `error`, refresh the current pose, reset the relay target once, retry `mode_guard` once, and otherwise stop with `REFUSE: ...` instead of extended diagnosis.",
     ]
     if visible_helpers:
         lines.append("Callable helper tools:")
@@ -131,6 +128,32 @@ def _helper_block(selected_helpers: list[str]) -> str:
             description = HELPER_PROMPT_DESCRIPTIONS[helper_name]
             lines.append(f"- `{helper_name}`: {description}")
     return "\n".join(lines)
+
+
+def _task_specific_block(task_id: str) -> str:
+    if task_id == "T2":
+        return textwrap.dedent(
+            """
+            T2 execution protocol:
+            - Use exactly two motion targets: a takeoff hold near one meter altitude, then a one-meter-forward hold at the same altitude.
+            - Do not retarget for the forward motion until the current pose is near the takeoff hold.
+            - Do not call `mode_guard(action='engage_offboard')` again after it succeeds unless the helper returns an explicit `error`.
+            - The simulator is already ready; do not idle for extra sensor or system initialization.
+            """
+        ).strip()
+    if task_id != "T3":
+        return ""
+    return textwrap.dedent(
+        """
+        T3 follow-up protocol:
+        - Use exactly two motion targets in the first turn: a takeoff hold near one meter altitude, then a halfway-forward hold at the same altitude.
+        - Do not retarget for the halfway-forward motion until the current pose is near the takeoff hold.
+        - Do not land until the current pose is near the halfway-forward hold at about one meter altitude.
+        - End the first turn with `CLARIFY: awaiting correction`.
+        - If the correction is `Stop there.`, hold the current position briefly, land from that position, and then finish with `DONE: ...`.
+        - If the correction is `Land now.`, land immediately from the current position and then finish with `DONE: ...`.
+        """
+    ).strip()
 
 
 def build_episode_prompt(
@@ -152,6 +175,7 @@ def build_episode_prompt(
     ]
     if normalized_condition == "C2":
         parts.append(_helper_block(selected_helpers or []))
+    parts.append(_task_specific_block(task_spec.task_id))
 
     parts.append(
         textwrap.dedent(

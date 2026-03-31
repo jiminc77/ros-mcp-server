@@ -193,3 +193,106 @@ def test_run_batch_prints_progress_and_quota_warning(tmp_path, monkeypatch, caps
     assert "[batch] start 1/1 C0:T1:01 attempt=1" in stdout
     assert "[batch] end 1/1 C0:T1:01 status=completed" in stdout
     assert "[batch] quota-warning C0:T1:01" in stdout
+
+
+def test_normalize_episode_start_state_forces_landed_disarmed_baseline(monkeypatch):
+    class FakeRequester:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def call_service(self, service: str, service_type: str, args: dict, timeout: float = 5.0) -> dict:
+            self.calls.append((service, service_type, args, timeout))
+            if service.endswith("set_mode"):
+                return {"values": {"mode_sent": True}}
+            return {"values": {"success": True, "result": 0}}
+
+    class FakeSubscriber:
+        def __init__(self, host: str, port: int, timeout: float = 1.0) -> None:
+            self.host = host
+            self.port = port
+            self.timeout = timeout
+
+        def subscribe(self, topic: str, msg_type: str, callback, **_: object) -> None:
+            if topic == "/mavros/state":
+                callback({"armed": False, "mode": "AUTO.LOITER", "system_status": 3})
+            elif topic == "/mavros/local_position/pose":
+                callback({"pose": {"position": {"z": 0.0}}})
+
+        def stop(self) -> None:
+            return
+
+    monkeypatch.setattr(runner, "RosbridgeSubscriber", FakeSubscriber)
+
+    requester = FakeRequester()
+    runner._normalize_episode_start_state(requester, host="127.0.0.1", port=9090, timeout_s=0.1)
+
+    assert requester.calls[0][0] == runner.SET_MODE_SERVICE
+    assert requester.calls[1][0] == runner.ARMING_SERVICE
+
+
+def test_vehicle_ready_requires_connected_pose_and_system_status():
+    assert runner._vehicle_ready({"connected": True, "z": 0.0, "system_status": 3}) is True
+    assert runner._vehicle_ready({"connected": True, "z": 0.0, "system_status": 0}) is False
+    assert runner._vehicle_ready({"connected": False, "z": 0.0, "system_status": 3}) is False
+
+def test_ensure_episode_stack_ready_restarts_on_unhealthy_baseline(monkeypatch, tmp_path):
+    snapshots = iter(
+        [
+            {"connected": True, "z": 0.0, "system_status": 0},
+            {"connected": True, "z": 0.0, "system_status": 0},
+            {"connected": True, "z": 0.0, "system_status": 3},
+        ]
+    )
+    restarted = {"count": 0}
+
+    monkeypatch.setattr(
+        runner,
+        "_sample_vehicle_state",
+        lambda **_: next(snapshots),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_restart_sim_stack",
+        lambda **_: restarted.__setitem__("count", restarted["count"] + 1),
+    )
+    monkeypatch.setattr(runner, "_normalize_episode_start_state", lambda *_, **__: None)
+
+    runner._ensure_episode_stack_ready(
+        cwd=tmp_path,
+        host="127.0.0.1",
+        port=9090,
+        progress_enabled=False,
+    )
+
+    assert restarted["count"] == 1
+
+
+def test_ensure_episode_stack_ready_prefers_local_recovery(monkeypatch, tmp_path):
+    snapshots = iter(
+        [
+            {"connected": True, "z": 0.0, "system_status": 0},
+            {"connected": True, "z": 0.0, "system_status": 3},
+        ]
+    )
+    restarted = {"count": 0}
+
+    monkeypatch.setattr(
+        runner,
+        "_sample_vehicle_state",
+        lambda **_: next(snapshots),
+    )
+    monkeypatch.setattr(runner, "_normalize_episode_start_state", lambda *_, **__: None)
+    monkeypatch.setattr(
+        runner,
+        "_restart_sim_stack",
+        lambda **_: restarted.__setitem__("count", restarted["count"] + 1),
+    )
+
+    runner._ensure_episode_stack_ready(
+        cwd=tmp_path,
+        host="127.0.0.1",
+        port=9090,
+        progress_enabled=False,
+    )
+
+    assert restarted["count"] == 0

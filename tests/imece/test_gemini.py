@@ -19,6 +19,13 @@ def test_extract_terminal_marker_uses_last_tag():
     assert payload == "complete"
 
 
+def test_extract_terminal_marker_handles_split_colon():
+    text = "Working\nDONE\n: mission complete"
+    label, payload = extract_terminal_marker(text)
+    assert label == "DONE"
+    assert payload == "mission complete"
+
+
 def test_gemini_runner_keeps_result_status_when_process_exits_late(tmp_path):
     script = tmp_path / "fake_gemini.sh"
     script.write_text(
@@ -51,3 +58,72 @@ def test_gemini_runner_keeps_result_status_when_process_exits_late(tmp_path):
     assert result.result_status == "success"
     assert result.terminal_label == "DONE"
     assert result.terminal_payload == "ok"
+
+
+def test_gemini_runner_finds_terminal_marker_across_split_assistant_events(tmp_path):
+    script = tmp_path / "fake_gemini_split.sh"
+    script.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env bash",
+                "printf '%s\\n' '{\"type\":\"init\",\"session_id\":\"sess-2\"}'",
+                "printf '%s\\n' '{\"type\":\"message\",\"role\":\"assistant\",\"content\":\"Working\"}'",
+                "printf '%s\\n' '{\"type\":\"message\",\"role\":\"assistant\",\"content\":\"DONE: The\"}'",
+                "printf '%s\\n' '{\"type\":\"message\",\"role\":\"assistant\",\"content\":\" task is complete\"}'",
+                "printf '%s\\n' '{\"type\":\"result\",\"status\":\"success\",\"stats\":{\"tool_calls\":0}}'",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    os.chmod(script, 0o755)
+    policy = tmp_path / "policy.toml"
+    policy.write_text("", encoding="utf-8")
+
+    runner = GeminiRunner(binary=str(script), cwd=tmp_path, base_env=os.environ.copy())
+    result = runner.run_turn(
+        prompt="test",
+        trace_path=tmp_path / "trace.jsonl",
+        stderr_path=tmp_path / "stderr.log",
+        policy_path=policy,
+        turn_index=1,
+        timeout_s=5.0,
+    )
+
+    assert result.result_status == "success"
+    assert result.terminal_label == "DONE"
+    assert result.terminal_payload == "The"
+
+
+def test_gemini_runner_finds_terminal_marker_when_label_and_colon_are_split(tmp_path):
+    script = tmp_path / "fake_gemini_split_colon.sh"
+    script.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env bash",
+                "printf '%s\\n' '{\"type\":\"init\",\"session_id\":\"sess-3\"}'",
+                "printf '%s\\n' '{\"type\":\"message\",\"role\":\"assistant\",\"content\":\"DONE\"}'",
+                "printf '%s\\n' '{\"type\":\"message\",\"role\":\"assistant\",\"content\":\": mission complete\"}'",
+                "printf '%s\\n' '{\"type\":\"result\",\"status\":\"success\",\"stats\":{\"tool_calls\":0}}'",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    os.chmod(script, 0o755)
+    policy = tmp_path / "policy.toml"
+    policy.write_text("", encoding="utf-8")
+
+    runner = GeminiRunner(binary=str(script), cwd=tmp_path, base_env=os.environ.copy())
+    result = runner.run_turn(
+        prompt="test",
+        trace_path=tmp_path / "trace.jsonl",
+        stderr_path=tmp_path / "stderr.log",
+        policy_path=policy,
+        turn_index=1,
+        timeout_s=5.0,
+    )
+
+    assert result.result_status == "success"
+    assert result.terminal_label == "DONE"
+    assert result.terminal_payload == "mission complete"

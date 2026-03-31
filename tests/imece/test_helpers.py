@@ -10,12 +10,18 @@ class _FakeRequester:
 
     def call_service(self, service: str, service_type: str, args: dict, timeout: float = 5.0) -> dict:
         self.calls.append((service, service_type, args, timeout))
+        if service.endswith("set_mode"):
+            return {"service": service, "values": {"mode_sent": True}}
+        if service.endswith("arming"):
+            return {"service": service, "values": {"success": True, "result": 0}}
         return {"service": service, "ok": True}
 
 
 class _FakeRelay:
     def __init__(self) -> None:
         self.stop_called = False
+        self.rate_hz = 20.0
+        self.publish_count = 50
 
     def stop(self) -> None:
         self.stop_called = True
@@ -35,6 +41,15 @@ def test_pose_relay_accepts_json_string_subfields():
 
     assert normalized["pose"]["position"] == {"x": 4.54, "y": 0.089, "z": 2.0}
     assert normalized["pose"]["orientation"]["w"] == -1.0
+
+
+def test_pose_relay_returns_soft_error_for_empty_target():
+    relay = PoseRelay(_FakeRequester())
+
+    result = relay.set_target({})
+
+    assert result["active"] is False
+    assert result["error"] == "target.pose.position.{x,y,z} must be present and numeric"
 
 
 def test_mode_guard_land_waits_for_safe_landing(monkeypatch):
@@ -65,6 +80,44 @@ def test_mode_guard_land_waits_for_safe_landing(monkeypatch):
     assert result["landing_complete"] is True
     assert result["latest_armed"] is False
     assert result["latest_z"] == 0.0
+
+
+def test_mode_guard_engage_offboard_surfaces_arming_failure(monkeypatch):
+    class FakeSubscriber:
+        def __init__(self, host: str, port: int, timeout: float = 1.0) -> None:
+            self.host = host
+            self.port = port
+            self.timeout = timeout
+
+        def subscribe(self, topic: str, msg_type: str, callback, **_: object) -> None:
+            if topic == "/mavros/state":
+                callback({"mode": "OFFBOARD"})
+
+        def stop(self) -> None:
+            return
+
+    monkeypatch.setattr("ros_mcp.imece.helpers.RosbridgeSubscriber", FakeSubscriber)
+
+    class ArmingFailureRequester(_FakeRequester):
+        def __init__(self) -> None:
+            super().__init__()
+            self.arming_calls = 0
+
+        def call_service(self, service: str, service_type: str, args: dict, timeout: float = 5.0) -> dict:
+            if service.endswith("set_mode"):
+                return {"service": service, "values": {"mode_sent": True}}
+            if service.endswith("arming"):
+                self.arming_calls += 1
+                return {"service": service, "values": {"success": False, "result": 1}}
+            return super().call_service(service, service_type, args, timeout)
+
+    requester = ArmingFailureRequester()
+    guard = ModeGuard(requester, _FakeRelay())
+    result = guard.engage_offboard()
+
+    assert result["error"] == "Vehicle did not arm after OFFBOARD engage"
+    assert result["arming_attempts"] == 2
+    assert requester.arming_calls == 2
 
 
 def test_review_c2_freeze_batch_marks_remaining_issues():

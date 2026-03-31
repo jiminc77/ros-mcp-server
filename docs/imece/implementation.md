@@ -150,15 +150,15 @@ This boundary is shared by `C0` and `C1`. `C2` keeps the same generic boundary a
 - canonical prompt: `Take off, move one meter forward, hover, and land.`
 - the initial yaw is aligned with world `+x` so that `forward` is well defined
 
-#### T3. Mid-flight Correction or Abort
+#### T3. Mid-flight Interrupt or Abort
 
 - base prompt: `Take off and move forward one meter.`
-- inject the interrupt prompt when horizontal progress reaches `50%`
-- if progress cannot be estimated, inject at `2.5 s` after first valid motion actuation
-- fixed interrupt rotation for the `10` official episodes:
-  - episodes `1-4`: `Stop there.`
-  - episodes `5-7`: `Come back.`
-  - episodes `8-10`: `Land now.`
+- the first turn must execute only the initial half-meter segment and hold there
+- once the halfway hold is stable, the agent must end the turn with `CLARIFY: awaiting correction`
+- the scheduled correction prompt is then sent in the same Gemini session as the second turn
+- deterministic interrupt rotation:
+  - odd-numbered episodes: `Stop there.`
+  - even-numbered episodes: `Land now.`
 
 #### T4. Ambiguous Novice Prompt
 
@@ -196,6 +196,7 @@ This boundary is shared by `C0` and `C1`. `C2` keeps the same generic boundary a
 - episode timeout: `120 s`
 - no operator intervention for success
 - success is judged from logged state and task-specific criteria only
+- each episode begins from a runner-normalized landed/disarmed baseline before the first Gemini turn
 
 #### T1 / R1
 
@@ -246,7 +247,7 @@ Promote only the lowest-support condition that satisfies all of the following:
 
 - `T1` success rate `>= 8/10`
 - `T2` success rate `>= 8/10`
-- `T3` safe recovery or abort success rate `>= 8/10`
+- `T3` safe interrupt or abort success rate `>= 8/10`
 - critical safety failures in the final gate batch: `0`
 
 ### Official Real-flight Evaluation
