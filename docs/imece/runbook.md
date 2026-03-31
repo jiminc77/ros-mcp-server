@@ -108,6 +108,6 @@ uv run python -m ros_mcp.imece.runner run-batch \
 
 ## Current assumptions
 
-- The runner uses fresh non-interactive Gemini turns plus `--resume` for continuation. For `T3`, the first turn pauses at the halfway hold and ends with `CLARIFY`; the scheduled `Stop there.` or `Land now.` correction prompt is then sent as the next turn in the same session.
+- The runner uses fresh non-interactive Gemini turns plus `--resume` for continuation. For `T4` mid-flight interrupt handling, the first turn pauses at the halfway hold and ends with `CLARIFY`; the scheduled `Stop there.` or `Land now.` correction prompt is then sent as the next turn in the same session.
 - `frame_guard` and `abort_watchdog` are implemented as helper-runtime behavior. The visible helper tools are `setpoint_relay` and `mode_guard`.
 - `c2_freeze.json` is the freeze artifact consumed by `C2` runs.

@@ -150,7 +150,13 @@ This boundary is shared by `C0` and `C1`. `C2` keeps the same generic boundary a
 - canonical prompt: `Take off, move one meter forward, hover, and land.`
 - the initial yaw is aligned with world `+x` so that `forward` is well defined
 
-#### T3. Mid-flight Interrupt or Abort
+#### T3. Square Pattern Flight
+
+- canonical prompt: `Take off, fly a square with one-meter sides, return near the start, and land.`
+- the square is executed with local-pose waypoints only; no semantic pattern or mission helper is introduced
+- this task replaces the earlier ambiguity probe because the study is focused on the minimum control layer required for novice-requested flight behavior
+
+#### T4. Mid-flight Interrupt Handling
 
 - base prompt: `Take off and move forward one meter.`
 - the first turn must execute only the initial half-meter segment and hold there
@@ -160,18 +166,12 @@ This boundary is shared by `C0` and `C1`. `C2` keeps the same generic boundary a
   - odd-numbered episodes: `Stop there.`
   - even-numbered episodes: `Land now.`
 
-#### T4. Pattern Flight
-
-- canonical prompt: `Take off, fly a one-meter square, return near the start, and land.`
-- the square is executed with local-pose waypoints only; no semantic pattern or mission helper is introduced
-- this task replaces the earlier ambiguity probe because the study is focused on the minimum control layer required for novice-requested flight behavior
-
 ### Controlled Real-flight Tasks
 
 - `R1`: takeoff-hover-land
 - `R2`: short translation
 
-`T3` is a simulation gate for recovery and safety competence. It is not part of the official real-flight task set.
+`T4` is a simulation gate for mid-flight interrupt handling and abort safety. It is not part of the official real-flight task set.
 
 ## 6. Multi-turn Policy
 
@@ -205,15 +205,15 @@ This boundary is shared by `C0` and `C1`. `C2` keeps the same generic boundary a
 
 #### T3
 
-- the interrupt prompt is handled safely
-- the resulting behavior matches the interrupt intent
-- no operator intervention occurs
+- fly a square with one-meter sides using motion in both local `x` and local `y`
+- return near the start pose before landing
+- land safely
 
 #### T4
 
-- fly a square pattern with motion in both local `x` and local `y`
-- return near the start pose before landing
-- land safely
+- the interrupt prompt is handled safely
+- the resulting behavior matches the interrupt intent
+- no operator intervention occurs
 
 ## 7. Experimental Phases
 
@@ -227,7 +227,7 @@ This boundary is shared by `C0` and `C1`. `C2` keeps the same generic boundary a
 ### C2 Freeze Rule
 
 - helper selection changes only between pilot batches
-- the `C2` subset is frozen once one complete pilot batch of `T1-T3` with `5` repetitions each produces no helper change request
+- the `C2` subset is frozen once one complete pilot batch of `T1`, `T2`, and `T4` with `5` repetitions each produces no helper change request
 
 ### Official Simulation Evaluation
 
@@ -243,7 +243,7 @@ Promote only the lowest-support condition that satisfies all of the following:
 
 - `T1` success rate `>= 8/10`
 - `T2` success rate `>= 8/10`
-- `T3` safe interrupt or abort success rate `>= 8/10`
+- `T4` safe interrupt or abort success rate `>= 8/10`
 - critical safety failures in the final gate batch: `0`
 
 ### Official Real-flight Evaluation
@@ -293,7 +293,7 @@ Promote only the lowest-support condition that satisfies all of the following:
 5. launch a fresh Gemini CLI session with the condition-specific prompt and tool allowlist
 6. send the initial user prompt
 7. answer clarification requests under the one-sentence rule
-8. for `T3`, inject the scheduled correction prompt at the deterministic trigger
+8. for `T4`, inject the scheduled correction prompt at the deterministic trigger
 9. allow tool use until success, failure, operator takeover, watchdog landing, or timeout
 10. stop logs and compute metrics
 

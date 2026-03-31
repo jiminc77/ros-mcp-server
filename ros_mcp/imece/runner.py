@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from .analysis import analyze_batch, classify_episode_report
-from .config import build_episode_prompt, load_c2_freeze, resolve_t3_interrupt, resolve_task_spec
+from .config import build_episode_prompt, load_c2_freeze, resolve_t4_interrupt, resolve_task_spec
 from .constants import (
     ARMING_SERVICE,
     ARMING_SERVICE_TYPE,
@@ -77,7 +77,7 @@ STUDY_PHASES = {
     "c2_freeze": StudyPhaseSpec(
         name="c2_freeze",
         conditions=("C2",),
-        tasks=("T1", "T2", "T3"),
+        tasks=("T1", "T2", "T4"),
         repetitions=5,
         automated=True,
         note="One complete pilot batch after helper changes; add 15 episodes for each extra freeze-validation batch.",
@@ -536,14 +536,6 @@ def _task_success(task_id: str, report: dict[str, Any]) -> bool:
             and safe_landed
         )
     if task_id == "T3":
-        if terminal_label != "DONE" or not actuation_seen or max_altitude < 0.8 or not safe_landed:
-            return False
-        if interrupt_prompt == "Stop there.":
-            return horizontal is not None and float(horizontal) <= 0.75
-        if interrupt_prompt == "Land now.":
-            return True
-        return False
-    if task_id == "T4":
         return (
             terminal_label == "DONE"
             and actuation_seen
@@ -556,6 +548,14 @@ def _task_success(task_id: str, report: dict[str, Any]) -> bool:
             and float(horizontal) <= 0.35
             and safe_landed
         )
+    if task_id == "T4":
+        if terminal_label != "DONE" or not actuation_seen or max_altitude < 0.8 or not safe_landed:
+            return False
+        if interrupt_prompt == "Stop there.":
+            return horizontal is not None and float(horizontal) <= 0.75
+        if interrupt_prompt == "Land now.":
+            return True
+        return False
     return False
 
 
@@ -624,7 +624,7 @@ def run_episode(args: argparse.Namespace) -> Path:
     current_prompt = prompt
     resume_session_id = None
     turns: list[dict[str, Any]] = []
-    interrupt_prompt = resolve_t3_interrupt(args.episode_index) if task_spec.task_id == "T3" else None
+    interrupt_prompt = resolve_t4_interrupt(args.episode_index) if task_spec.task_id == "T4" else None
     interrupt_sent = False
     timed_out = False
     terminal_label = None
@@ -666,7 +666,7 @@ def run_episode(args: argparse.Namespace) -> Path:
             terminal_label = result.terminal_label
             terminal_payload = result.terminal_payload
 
-            if task_spec.task_id == "T3" and interrupt_prompt and not interrupt_sent and terminal_label == "CLARIFY":
+            if task_spec.task_id == "T4" and interrupt_prompt and not interrupt_sent and terminal_label == "CLARIFY":
                 _normalize_episode_start_state(
                     ros_requester,
                     host=rosbridge_ip,
@@ -722,6 +722,7 @@ def run_episode(args: argparse.Namespace) -> Path:
             "batch_id": batch_id,
             "condition": args.condition.upper(),
             "task_id": task_spec.task_id,
+            "task_name": task_spec.title,
             "episode_index": args.episode_index,
             "session_id": resume_session_id,
             "terminal_label": terminal_label,
@@ -756,7 +757,16 @@ def run_episode(args: argparse.Namespace) -> Path:
         metrics["task_success"] = _task_success(task_spec.task_id, metrics)
         metrics["failure_codes"] = classify_episode_report(metrics)
 
-        _write_json(episode_dir / "metadata.json", {"turns": turns, "selected_helpers": selected_helpers})
+        _write_json(
+            episode_dir / "metadata.json",
+            {
+                "condition": args.condition.upper(),
+                "task_id": task_spec.task_id,
+                "task_name": task_spec.title,
+                "selected_helpers": selected_helpers,
+                "turns": turns,
+            },
+        )
         _write_json(episode_dir / "metrics.json", metrics)
         if progress_enabled and not from_batch:
             failure_codes = ",".join(metrics["failure_codes"]) if metrics["failure_codes"] else "-"

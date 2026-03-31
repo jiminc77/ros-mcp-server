@@ -1,5 +1,5 @@
 from ros_mcp.imece.analysis import classify_episode_report, select_c2_helpers
-from ros_mcp.imece.config import resolve_t3_interrupt
+from ros_mcp.imece.config import resolve_t4_interrupt
 from ros_mcp.imece.runner import _task_success
 
 
@@ -58,7 +58,7 @@ def test_task_success_accepts_safe_disarmed_landing_without_land_mode():
     assert _task_success("T1", report) is True
 
 
-def test_task_success_t3_stop_there_accepts_safe_halfway_landing():
+def test_task_success_t4_stop_there_accepts_safe_halfway_landing():
     report = {
         "max_altitude_m": 1.0,
         "final_position": {"z": 0.0},
@@ -68,10 +68,10 @@ def test_task_success_t3_stop_there_accepts_safe_halfway_landing():
         "interrupt_prompt": "Stop there.",
         "horizontal_displacement_m": 0.52,
     }
-    assert _task_success("T3", report) is True
+    assert _task_success("T4", report) is True
 
 
-def test_task_success_t3_land_now_accepts_safe_landing():
+def test_task_success_t4_land_now_accepts_safe_landing():
     report = {
         "max_altitude_m": 1.0,
         "final_position": {"z": 0.0},
@@ -81,10 +81,10 @@ def test_task_success_t3_land_now_accepts_safe_landing():
         "interrupt_prompt": "Land now.",
         "horizontal_displacement_m": 0.52,
     }
-    assert _task_success("T3", report) is True
+    assert _task_success("T4", report) is True
 
 
-def test_task_success_t4_accepts_square_return_and_landing():
+def test_task_success_t3_accepts_square_return_and_landing():
     report = {
         "max_altitude_m": 1.0,
         "final_position": {"z": 0.0},
@@ -95,18 +95,18 @@ def test_task_success_t4_accepts_square_return_and_landing():
         "x_span_m": 0.95,
         "y_span_m": 0.91,
     }
-    assert _task_success("T4", report) is True
+    assert _task_success("T3", report) is True
 
 
-def test_resolve_t3_interrupt_alternates_stop_and_land():
-    assert resolve_t3_interrupt(1) == "Stop there."
-    assert resolve_t3_interrupt(2) == "Land now."
-    assert resolve_t3_interrupt(3) == "Stop there."
+def test_resolve_t4_interrupt_alternates_stop_and_land():
+    assert resolve_t4_interrupt(1) == "Stop there."
+    assert resolve_t4_interrupt(2) == "Land now."
+    assert resolve_t4_interrupt(3) == "Stop there."
 
 
-def test_classify_episode_report_ignores_intentional_t3_pause_gap():
+def test_classify_episode_report_ignores_intentional_t4_pause_gap():
     report = {
-        "task_id": "T3",
+        "task_id": "T4",
         "terminal_label": "DONE",
         "actuation_seen": True,
         "interrupt_sent": True,

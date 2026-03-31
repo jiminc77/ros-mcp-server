@@ -19,6 +19,7 @@ from .constants import (
 @dataclass(frozen=True)
 class TaskSpec:
     task_id: str
+    title: str
     canonical_prompt: str
     clarification_reply: str | None = None
 
@@ -26,27 +27,31 @@ class TaskSpec:
 TASK_SPECS = {
     "T1": TaskSpec(
         task_id="T1",
+        title="Takeoff Hover Land",
         canonical_prompt="Take off to one meter, hover for five seconds, then land.",
         clarification_reply="Use the current local pose as the start, go to about one meter altitude, hover five seconds, then land.",
     ),
     "T2": TaskSpec(
         task_id="T2",
+        title="Short Translation",
         canonical_prompt="Take off, move one meter forward, hover, and land.",
         clarification_reply="Use local ENU with forward as +x, move one meter at about one meter altitude, hover briefly, then land.",
     ),
     "T3": TaskSpec(
         task_id="T3",
-        canonical_prompt="Take off and move forward one meter.",
-        clarification_reply="Use local ENU with forward as +x and move one meter unless I interrupt with a correction.",
+        title="Square Pattern Flight",
+        canonical_prompt="Take off, fly a square with one-meter sides, return near the start, and land.",
+        clarification_reply="Use local ENU at about one meter altitude, fly a square with one-meter sides, return near the start pose, then land.",
     ),
     "T4": TaskSpec(
         task_id="T4",
-        canonical_prompt="Take off, fly a one-meter square, return near the start, and land.",
-        clarification_reply="Use local ENU at about one meter altitude, fly a square with one-meter sides, return near the start pose, then land.",
+        title="Mid-flight Interrupt Handling",
+        canonical_prompt="Take off and move forward one meter.",
+        clarification_reply="Use local ENU with forward as +x and move one meter unless I interrupt with a correction.",
     ),
 }
 
-T3_INTERRUPT_PROMPTS = ("Stop there.", "Land now.")
+T4_INTERRUPT_PROMPTS = ("Stop there.", "Land now.")
 
 
 def _read_condition_artifact(name: str) -> str:
@@ -61,10 +66,10 @@ def resolve_task_spec(task_id: str) -> TaskSpec:
     return TASK_SPECS[normalized]
 
 
-def resolve_t3_interrupt(episode_index: int) -> str:
+def resolve_t4_interrupt(episode_index: int) -> str:
     if episode_index < 1:
-        raise ValueError("T3 episode_index must be positive")
-    return T3_INTERRUPT_PROMPTS[(episode_index - 1) % len(T3_INTERRUPT_PROMPTS)]
+        raise ValueError("T4 episode_index must be positive")
+    return T4_INTERRUPT_PROMPTS[(episode_index - 1) % len(T4_INTERRUPT_PROMPTS)]
 
 
 def load_c2_freeze(path: Path | None = None) -> dict:
@@ -140,21 +145,21 @@ def _task_specific_block(task_id: str) -> str:
             - The simulator is already ready; do not idle for extra sensor or system initialization.
             """
         ).strip()
-    if task_id == "T4":
+    if task_id == "T3":
         return textwrap.dedent(
             """
-            T4 execution protocol:
+            T3 execution protocol:
             - Use exactly five motion targets: a takeoff hold near one meter altitude, then the three new square corners, then a return-to-start hold at the same altitude.
             - Keep the square axis-aligned in local ENU using one-meter sides.
             - Verify only briefly at each corner; do not add extra pattern segments or loiter loops.
             - Land after returning near the start pose.
             """
         ).strip()
-    if task_id != "T3":
+    if task_id != "T4":
         return ""
     return textwrap.dedent(
         """
-        T3 follow-up protocol:
+        T4 follow-up protocol:
         - Use exactly two motion targets in the first turn: a takeoff hold near one meter altitude, then a halfway-forward hold at the same altitude.
         - Do not retarget for the halfway-forward motion until the current pose is near the takeoff hold.
         - Do not land until the current pose is near the halfway-forward hold at about one meter altitude.
@@ -192,6 +197,7 @@ def build_episode_prompt(
             Episode metadata:
             - condition: `{normalized_condition}`
             - task: `{task_spec.task_id}`
+            - task_name: `{task_spec.title}`
             - episode_index: `{episode_index}`
 
             Task prompt:

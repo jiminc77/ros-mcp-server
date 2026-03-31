@@ -154,7 +154,7 @@ Fixed counts from `implementation.md`:
   - total: `2 x 4 x 5 = 40`
 - one `C2` freeze-validation batch
   - `C2`
-  - `T1-T3`
+  - `T1`, `T2`, `T4`
   - `5` repetitions each
   - total: `1 x 3 x 5 = 15`
 - official simulation

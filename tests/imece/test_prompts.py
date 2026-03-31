@@ -52,8 +52,8 @@ def test_shared_terminal_contract_is_present():
     assert "DONE:" in prompt
 
 
-def test_t3_prompt_includes_staged_followup_protocol():
-    prompt = build_episode_prompt("C2", "T3", 1, "127.0.0.1", 9090, selected_helpers=["setpoint_relay"])
+def test_t4_prompt_includes_staged_followup_protocol():
+    prompt = build_episode_prompt("C2", "T4", 1, "127.0.0.1", 9090, selected_helpers=["setpoint_relay"])
     assert "Use exactly two motion targets in the first turn" in prompt
     assert "Do not retarget for the halfway-forward motion until the current pose is near the takeoff hold" in prompt
     assert "CLARIFY: awaiting correction" in prompt
@@ -66,8 +66,9 @@ def test_t2_prompt_includes_two_stage_motion_protocol():
     assert "Do not retarget for the forward motion until the current pose is near the takeoff hold" in prompt
 
 
-def test_t4_prompt_includes_square_pattern_protocol():
-    prompt = build_episode_prompt("C2", "T4", 1, "127.0.0.1", 9090, selected_helpers=["setpoint_relay"])
-    assert "fly a one-meter square" in prompt
+def test_t3_prompt_includes_square_pattern_protocol():
+    prompt = build_episode_prompt("C2", "T3", 1, "127.0.0.1", 9090, selected_helpers=["setpoint_relay"])
+    assert "task_name: `Square Pattern Flight`" in prompt
+    assert "fly a square with one-meter sides" in prompt
     assert "Use exactly five motion targets" in prompt
     assert "Keep the square axis-aligned in local ENU" in prompt
