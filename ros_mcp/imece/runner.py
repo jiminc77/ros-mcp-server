@@ -94,11 +94,11 @@ STUDY_PHASES = {
     ),
     "official_real": StudyPhaseSpec(
         name="official_real",
-        conditions=("PROMOTED",),
-        tasks=("R1", "R2"),
+        conditions=("C2",),
+        tasks=("T1", "T2", "T3", "T4"),
         repetitions=5,
         automated=False,
-        note="Real-flight evaluation count. Promotion condition is chosen after simulation gates.",
+        note="Manual real-flight evaluation count. The current plan carries forward C2 only across T1-T4.",
     ),
 }
 
@@ -284,7 +284,7 @@ def study_plan_summary() -> dict[str, Any]:
             "Discovery is 2 conditions x 4 tasks x 5 reps = 40 episodes.",
             "One C2 freeze-validation batch is 1 condition x 4 tasks x 5 reps = 20 episodes.",
             "Official simulation is 3 conditions x 4 tasks x 10 reps = 120 episodes.",
-            "Official real-flight is 1 promoted condition x 2 tasks x 5 reps = 10 episodes.",
+            "Official real-flight is 1 C2 condition x 4 tasks x 5 reps = 20 episodes.",
         ],
     }
 
@@ -1215,7 +1215,7 @@ def build_parser() -> argparse.ArgumentParser:
     real_episode = subparsers.add_parser("run-real-episode")
     add_shared(real_episode)
     real_episode.add_argument("--condition", choices=["C0", "C1", "C2"], required=True)
-    real_episode.add_argument("--task", choices=["R1", "R2"], required=True)
+    real_episode.add_argument("--task", choices=["T1", "T2", "T3", "T4"], required=True)
     real_episode.add_argument("--episode-index", type=int, required=True)
 
     batch = subparsers.add_parser("run-batch")

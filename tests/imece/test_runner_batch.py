@@ -36,9 +36,9 @@ def test_study_plan_summary_matches_spec_counts():
     assert summary["phases"]["discovery"]["episode_count"] == 40
     assert summary["phases"]["c2_freeze"]["episode_count"] == 20
     assert summary["phases"]["official_sim"]["episode_count"] == 120
-    assert summary["phases"]["official_real"]["episode_count"] == 10
+    assert summary["phases"]["official_real"]["episode_count"] == 20
     assert summary["simulation_total_before_real"] == 180
-    assert summary["fixed_total_with_one_c2_freeze_batch"] == 190
+    assert summary["fixed_total_with_one_c2_freeze_batch"] == 200
 
 
 def test_run_batch_retries_infra_errors_at_end(tmp_path, monkeypatch):
@@ -338,11 +338,11 @@ def test_ensure_real_episode_ready_rejects_unhealthy_baseline(monkeypatch):
 def test_parser_accepts_run_real_episode_command():
     parser = runner.build_parser()
     args = parser.parse_args(
-        ["run-real-episode", "--condition", "C2", "--task", "R1", "--episode-index", "1"]
+        ["run-real-episode", "--condition", "C2", "--task", "T1", "--episode-index", "1"]
     )
     assert args.command == "run-real-episode"
     assert args.condition == "C2"
-    assert args.task == "R1"
+    assert args.task == "T1"
     assert args.episode_index == 1
 
 def test_ensure_episode_stack_ready_restarts_on_unhealthy_baseline(monkeypatch, tmp_path):

@@ -196,20 +196,41 @@ Before running `official_sim`, make sure:
 ## 9. Official Real Flight
 
 There is no batch-level `official_real` phase command yet.
-Current real flight is one episode at a time:
+Current real flight is one episode at a time, but the intended preserved matrix is:
+
+- condition: `C2`
+- tasks: `T1`, `T2`, `T3`, `T4`
+- repetitions: `5` each
+- total: `20`
+
+Single-episode command:
 
 ```bash
 uv run python -m ros_mcp.imece.runner run-real-episode \
   --condition C2 \
-  --task R1 \
+  --task T1 \
   --episode-index 1 \
-  --batch-id official-real-r1-001
+  --batch-id official-real-001
+```
+
+To preserve the full 20-episode real-flight batch under one batch ID:
+
+```bash
+for task in T1 T2 T3 T4; do
+  for i in 1 2 3 4 5; do
+    uv run python -m ros_mcp.imece.runner run-real-episode \
+      --condition C2 \
+      --task "${task}" \
+      --episode-index "${i}" \
+      --batch-id official-real-001
+  done
+done
 ```
 
 Important:
 
-- replace `C2` with the promoted condition after the simulation gate
-- use `R1` or `R2`
+- keep the same `--batch-id` across all 20 episodes if they belong to one preserved official real-flight batch
+- use `T1`, `T2`, `T3`, or `T4`
 - keep operator go/no-go judgment manual
 - keep RC or QGroundControl takeover available
 

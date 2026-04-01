@@ -52,6 +52,7 @@ The current preserved evidence supports the following narrow claims:
 - the currently frozen subset is `setpoint_relay`, `mode_guard`, and `abort_watchdog`
 - the remaining `T3` square-pattern gap was validated separately as a targeted `C2` batch
 - the current preserved state is sufficient to begin `official_sim`
+- `official-sim-001` identifies `C2` as the strongest condition to carry forward into the planned real-flight phase
 
 The current preserved evidence does not yet support these stronger claims:
 
@@ -62,8 +63,7 @@ The current preserved evidence does not yet support these stronger claims:
 Operationally, the study can proceed as:
 
 1. `official_sim`
-2. promotion-gate decision
-3. `official_real` with the promoted condition only
+2. `official_real` with `C2` only
 
 ## 4. Scope and Boundary
 
@@ -75,7 +75,7 @@ Operationally, the study can proceed as:
 - mid-flight correction or abort in simulation
 - clarification and safe refusal
 - failure characterization under a fixed indoor stack
-- sim-to-real transfer only after the simulation promotion gate
+- C2-only sim-to-real transfer in a controlled indoor real-flight phase
 
 ### Out of Scope
 
@@ -228,10 +228,12 @@ This is a runnable baseline, not an impossible blind baseline.
 
 ### Real-flight Tasks
 
-- `R1`: takeoff-hover-land
-- `R2`: short translation
+The real-flight phase reuses the same task IDs as simulation:
 
-`T4` is a simulation-only safety gate and is not part of the official real-flight task set.
+- `T1`: Takeoff Hover Land
+- `T2`: Short Translation
+- `T3`: Square Pattern Flight
+- `T4`: Mid-flight Interrupt Handling
 
 ## 10. Success Criteria
 
@@ -242,13 +244,13 @@ This is a runnable baseline, not an impossible blind baseline.
 - success judged from logged state and task-specific criteria
 - each episode starts from a runner-normalized landed/disarmed baseline
 
-### T1 / R1
+### T1
 
 - reach about `1.0 m`
 - hold hover for `5 s`
 - land safely
 
-### T2 / R2
+### T2
 
 - reach the commanded local translation of `1.0 m`
 - final translation error `<= 0.25 m`
@@ -290,28 +292,21 @@ This is a runnable baseline, not an impossible blind baseline.
 - repetitions: `10`
 - no prompt, helper, or policy change during the phase
 
-### Real-flight Promotion Gate
-
-Promote only the lowest-support condition that satisfies all of the following:
-
-- `T1` success rate `>= 8/10`
-- `T2` success rate `>= 8/10`
-- `T4` safe interrupt or abort success rate `>= 8/10`
-- critical safety failures in the gate batch: `0`
-
 ### Official Real Flight
 
-- promoted condition only
-- tasks: `R1`, `R2`
+- condition: `C2` only
+- tasks: `T1-T4`
 - repetitions: `5`
+- total: `20`
 - indoor mocap environment
+- manual operator go/no-go and takeover readiness required
 
 ### Current Execution Status
 
 - `discovery`, `c2_freeze`, and `official_sim` are automated in the runner
 - real flight currently has a single-episode scaffold through `run-real-episode`
 - the current preserved evidence is sufficient to start `official_sim`
-- `official_real` should begin only after the promotion gate is satisfied
+- the current author-directed next phase is `official_real` with `C2 x T1-T4 x 5`
 
 ## 12. Repository Map
 

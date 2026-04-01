@@ -77,7 +77,7 @@ Examples:
 
 - task definitions
 - success criteria
-- promotion gate
+- real-flight task scope
 - allowed helper boundary
 - fixed phase counts
 

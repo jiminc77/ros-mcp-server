@@ -60,9 +60,11 @@ Important differences across preserved batches:
   - `T2`: Short Translation
   - `T3`: Square Pattern Flight
   - `T4`: Mid-flight Interrupt Handling
-- real flight:
-  - `R1`: takeoff-hover-land
-  - `R2`: short translation
+- planned real flight:
+  - `C2` only
+  - `T1-T4`
+  - `5` repetitions per task
+  - total `20` episodes
 
 ### Historical Note
 
@@ -334,7 +336,7 @@ Artifact root: [`artifacts/imece/official-sim-001/`](../../artifacts/imece/offic
 Purpose:
 
 - compare `C0`, `C1`, and `C2` head-to-head under the fixed final task set
-- determine whether any condition satisfies the promotion gate for real flight
+- identify the strongest preserved condition to carry forward into the planned `C2` real-flight phase
 
 Matrix:
 
@@ -425,59 +427,12 @@ Implementation implication from the initial official batch:
   - `T1`: require explicit altitude attainment verification before landing or `DONE`
   - `T4`: require `Stop there.` handling to remain start-relative and forbid origin-based retargeting
 
-Targeted `C2` refinement and revised official comparison:
+Official-simulation conclusion from `official-sim-001`:
 
-- To preserve baseline provenance, `official-sim-001` was left unchanged.
-- A revised batch, [`official-sim-002`](../../artifacts/imece/official-sim-002), was cloned from `official-sim-001`.
-- Only `C2:T1` and `C2:T4` were rerun in `official-sim-002`.
-- `C0` and `C1` remained byte-for-byte identical to `official-sim-001`.
-- `C2:T2` and `C2:T3` remained byte-for-byte identical to `official-sim-001`.
-- The only code change between the two official batches was a `C2`-only prompt refinement:
-  - `T1`: explicit takeoff-hold verification before landing or `DONE`
-  - `T4`: explicit start-relative `Stop there.` handling with no origin-based retargeting
-
-Revised-analysis result from `official-sim-002`:
-
-| Condition | Overall success | `T1` | `T2` | `T3` | `T4` |
-| --- | --- | --- | --- | --- | --- |
-| `C0` | `6/40 = 15.0%` | `5/10` | `0/10` | `0/10` | `1/10` |
-| `C1` | `6/40 = 15.0%` | `6/10` | `0/10` | `0/10` | `0/10` |
-| `C2` | `40/40 = 100.0%` | `10/10` | `10/10` | `10/10` | `10/10` |
-
-Representative corrected `C2` episodes in `official-sim-002`:
-
-- [`C2/T1/episode-04/metrics.json`](../../artifacts/imece/official-sim-002/C2/T1/episode-04/metrics.json)
-  - `task_success = true`
-  - `max_altitude_m = 1.0035`
-  - `latest_armed = false`
-- [`C2/T1/episode-06/metrics.json`](../../artifacts/imece/official-sim-002/C2/T1/episode-06/metrics.json)
-  - `task_success = true`
-  - `max_altitude_m = 1.0010`
-  - `latest_armed = false`
-- [`C2/T1/episode-09/metrics.json`](../../artifacts/imece/official-sim-002/C2/T1/episode-09/metrics.json)
-  - `task_success = true`
-  - `max_altitude_m = 1.0079`
-  - `latest_armed = false`
-- [`C2/T4/episode-05/metrics.json`](../../artifacts/imece/official-sim-002/C2/T4/episode-05/metrics.json)
-  - `task_success = true`
-  - `horizontal_displacement_m = 0.4555` under `Stop there.`
-  - the revised trace holds and lands near the current local position instead of retargeting toward the world origin
-
-Promotion-gate result after the revised official batch:
-
-| Condition | `T1` gate | `T2` gate | `T4` gate | Critical safety failures | Promotion result |
-| --- | --- | --- | --- | --- | --- |
-| `C0` | `5/10` | `0/10` | `1/10` | `33` | fail |
-| `C1` | `6/10` | `0/10` | `0/10` | `32` | fail |
-| `C2` | `10/10` | `10/10` | `10/10` | `0` | pass |
-
-Official-simulation conclusion after `official-sim-002`:
-
-- `C0` and `C1` still define the generic and prompt-only boundary, and both remain brittle on the final task set
-- `C2` remains the same frozen helper subset as before; no new helper class was introduced
-- the targeted `C2` prompt refinements close the remaining `T1` and `T4` gaps without changing `T2`, `T3`, or the helper inventory
-- the promoted condition is now `C2`
-- under the current specification, `official_real` may start with promoted `C2`
+- `C0` and `C1` remain brittle on the final task set
+- `C2` is decisively stronger than `C0` and `C1` on the same fixed interface and task map
+- `C2` fully repairs `T2` and `T3` in the preserved official comparison and reaches strong but imperfect performance on `T1` and `T4`
+- `official-sim-001` therefore motivates carrying `C2` forward into real flight as the strongest condition, while still preserving the remaining `T1` and `T4` misses as part of the paper narrative
 
 ### Phase D. Official Real Flight
 
@@ -485,13 +440,14 @@ Current status:
 
 - not yet preserved
 - single-episode scaffold exists
-- the simulation promotion gate is now satisfied by `C2` in `official-sim-002`
+- the planned matrix is `C2 x T1-T4 x 5 = 20` episodes
 
 What it should mean in the paper:
 
-- promoted condition only
+- `C2` only
 - indoor mocap environment
-- tasks `R1`, `R2`
+- tasks `T1`, `T2`, `T3`, `T4`
+- `5` repetitions per task
 - operator remains responsible for go/no-go and takeover readiness
 
 ## 8. Analysis Method Used on Preserved Artifacts
@@ -555,13 +511,13 @@ Supported today:
 - discovery justifies a frozen minimal `C2` subset of `setpoint_relay`, `mode_guard`, and `abort_watchdog`
 - targeted `C2:T3` validation closes the remaining preserved square-pattern gap
 - official simulation shows a large gap between `C2` and the `C0/C1` baselines on the final fixed task set
+- `official-sim-001` identifies `C2` as the strongest preserved condition to carry forward into the planned real-flight phase
 
 Not yet supported today:
 
-- promotion of any condition to `official_real` under the current gate
 - real-flight transfer result claims
 - repeated frame/sign errors as a preserved freeze driver
-- a claim that `C2` is already fully validated across `T1-T4` under the promotion criterion
+- a claim that `C2` is already fully validated across `T1-T4` in preserved official evidence
 
 ## 10. What to Update When New Batches Arrive
 
