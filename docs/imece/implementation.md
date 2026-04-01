@@ -1,280 +1,294 @@
-# IMECE Staged Boundary Study
+# IMECE Study Specification and Implementation Map
 
-## 1. Goal and Boundary
+This document is the normative source of truth for the IMECE staged boundary study.
 
-This document defines the experiment specification for a staged study of beginner-oriented drone control with a Gemini CLI agent connected to PX4 through generic ROS interfaces.
+Use this file for:
 
-The primary question is not whether an LLM can replace a flight controller. The primary question is where generic ROS-level tool use stops being sufficient and where a minimal non-semantic support layer becomes necessary.
+- the paper's intended argument flow
+- the fixed experiment boundary and success criteria
+- the current implementation map of the repository
+- the exact meaning of each study phase
 
-### In-scope
+Use [`experiment-record.md`](./experiment-record.md) for preserved evidence and paper-facing analysis of what actually ran.
+Use [`runbook.md`](./runbook.md) for commands and operator steps.
+Use [`agent-development-guide.md`](./agent-development-guide.md) for how future agents should analyze results and update the documentation set.
+
+## 1. Study Positioning
+
+The study asks a narrow question:
+
+- how far can an off-the-shelf LLM operate a PX4 drone through generic ROS-level tools alone
+- where does prompt-only guidance stop being enough
+- what is the minimum non-semantic stabilization needed before drone-specific MCP design is justified
+
+The intended paper flow is staged, not monolithic:
+
+1. `C0` measures the raw generic ROS-MCP baseline.
+2. `C1` tests whether prompt context alone repairs the baseline.
+3. `C2` adds only a frozen minimal helper layer after discovery shows repeated low-level failures that prompt context did not repair.
+
+The study is therefore not a claim that a generic ROS tool surface is sufficient for all drone control. It is a boundary study about where generic tool use breaks and what minimum extra support is required.
+
+## 2. Research Questions
+
+### RQ1. Feasibility
+
+- Can generic ROS-level tool selection support basic PX4 beginner flight tasks?
+
+### RQ2. Failure Modes
+
+- Where does generic tool use become brittle?
+- Which failures are prompt-repairable, and which require a thin low-level support layer?
+
+### RQ3. Transfer
+
+- Can the interaction pattern that works in simulation transfer at minimum scale to controlled indoor real flight?
+
+## 3. Claim Boundary and Current Study Status
+
+The current preserved evidence supports the following narrow claims:
+
+- discovery justifies why a frozen `C2` helper subset is needed at all
+- the currently frozen subset is `setpoint_relay`, `mode_guard`, and `abort_watchdog`
+- the remaining `T3` square-pattern gap was validated separately as a targeted `C2` batch
+- the current preserved state is sufficient to begin `official_sim`
+
+The current preserved evidence does not yet support these stronger claims:
+
+- that `C2` has already been fully validated across the final `T1-T4` task set
+- that real-flight transfer has already been demonstrated
+- that repeated explicit frame/sign failures are part of the preserved freeze rationale
+
+Operationally, the study can proceed as:
+
+1. `official_sim`
+2. promotion-gate decision
+3. `official_real` with the promoted condition only
+
+## 4. Scope and Boundary
+
+### In Scope
 
 - `arm / disarm`
 - `takeoff / hover / land`
 - short-range local-position motion
-- mid-flight correction or abort
-- ambiguity handling through clarification or safe refusal
-- failure characterization and sim-to-real transfer under a tightly constrained indoor setup
+- mid-flight correction or abort in simulation
+- clarification and safe refusal
+- failure characterization under a fixed indoor stack
+- sim-to-real transfer only after the simulation promotion gate
 
-### Out-of-scope
+### Out of Scope
 
 - obstacle avoidance
 - perception-heavy autonomy
 - SLAM or planning stacks
 - body-frame velocity control as the main interface
 - semantic drone APIs such as `takeoff()`, `goto()`, `fly_square()`
-- persistent memory adaptation during official evaluation
+- mission executors, behavior trees, or path generators
+- adaptive memory across official episodes
 
-## 2. Fixed Platform Assumptions
+## 5. Fixed Platform Assumptions
 
 - OS: `Ubuntu 24.04`
-- middleware: `ROS2 Jazzy`
+- middleware: `ROS 2 Jazzy`
 - simulator: `Gazebo`
 - autopilot: `PX4`
 - bridge: `MAVROS`
 - MCP bridge: `ros-mcp-server`
 - agent runtime: `Gemini CLI`
 
-The official comparison unit is a `Gemini CLI auto-routing agent session` with ros-mcp attached. The routed model remains `auto`; the actual routed model used in each episode is logged as metadata.
+The official comparison unit is one fresh Gemini CLI session per episode.
+The routed model remains `auto`; the actual routed model must be logged from the episode trace.
 
-Official evaluation always starts a fresh Gemini session per episode. Discovery work may use longer interactive sessions, but official runs may not carry memory between episodes.
+## 6. Control Surface Boundary
 
-The official control surface is restricted to ROS introspection, topic publish, topic subscribe, state read, and service call over a `local pose` flight interface plus mode and arming control.
+The study intentionally exposes only an IMECE-scoped subset of ros-mcp.
 
-### Repository Map
-
-The IMECE work is split across a small number of directories. This is the intended map of the working tree:
-
-| Path | Role |
-| --- | --- |
-| [`docs/imece/implementation.md`](./implementation.md) | experiment specification and current source of truth |
-| [`docs/imece/design-rationale.md`](./design-rationale.md) | why the staged `C0 -> C1 -> C2` design exists |
-| [`docs/imece/experiment-record.md`](./experiment-record.md) | preserved experiment history, prompt/task evolution, and paper-facing evidence summary |
-| [`docs/imece/runbook.md`](./runbook.md) | how to run the simulation study and inspect outputs |
-| [`config/imece/`](../../config/imece/) | condition artifacts, Gemini policy, and frozen `C2` helper selection |
-| [`ros_mcp/imece/`](../../ros_mcp/imece/) | IMECE runtime code: prompt builder, runner, helper layer, monitoring, and analysis |
-| [`scripts/imece/`](../../scripts/imece/) | simulator bring-up, shutdown, and Gemini MCP setup helpers |
-| [`tests/imece/`](../../tests/imece/) | automated tests for the IMECE runner, prompts, helpers, and analysis |
-| [`artifacts/imece/`](../../artifacts/imece/) | batch outputs such as prompts, traces, metrics, metadata, and analysis summaries |
-
-When you need to answer “where is X?”, the usual rule is:
-
-- experiment rules and intended methodology: `docs/imece/`
-- machine-readable prompt and freeze artifacts: `config/imece/`
-- executable implementation: `ros_mcp/imece/`
-- generated run evidence: `artifacts/imece/`
-
-### Control Surface Boundary
-
-The study does not expose the full ROS graph to the agent. It exposes an IMECE-scoped subset of ros-mcp that is sufficient for the target tasks but intentionally excludes higher-level or off-scope interfaces.
-
-| Category | Allowed surface | Excluded surface | Boundary reason |
+| Category | Allowed surface | Excluded surface | Why |
 | --- | --- | --- | --- |
-| State observation | `/mavros/state`, `/mavros/local_position/pose`, `/mavros/battery` | arbitrary ROS topics, node graph, parameters | enough state for task completion, safety checks, and post-hoc scoring |
-| Control output | `/mavros/setpoint_position/local` | velocity control, body-frame control, mission topics, arbitrary publish targets | fixes the study on local-pose control so frame and timing failures remain observable |
-| Services | `/mavros/set_mode`, `/mavros/cmd/arming` | `/mavros/cmd/takeoff`, `/mavros/cmd/land`, and other MAVROS services | removes semantic shortcuts and preserves the need to reason about mode ordering and arming |
-| Generic tool families | topic and service introspection, subscribe, publish, call | actions, nodes, parameters, robot spec tools, image tools | removes unrelated surface area that would weaken attribution of failures |
+| State observation | `/mavros/state`, `/mavros/local_position/pose`, `/mavros/battery` | arbitrary ROS topics, node graph, parameters | enough state for completion, scoring, and safety checks |
+| Control output | `/mavros/setpoint_position/local` | velocity control, body-frame control, mission topics, arbitrary publish targets | keeps the study on local-pose control |
+| Services | `/mavros/set_mode`, `/mavros/cmd/arming` | semantic MAVROS flight services such as takeoff or land | preserves mode-order reasoning and arming responsibility |
+| Generic tool families | topic/service introspection, subscribe, publish, call | actions, parameters, robot-spec tools, unrelated surface | keeps failure attribution interpretable |
 
-The current shared interface used for future `official_sim` runs is stabilized in two narrow, non-semantic ways:
+The shared generic surface used for future `official_sim` runs is stabilized in only two narrow ways:
 
-- generic tools tolerate stray `wait_for_previous` fields instead of failing on schema drift
-- `subscribe_for_duration` returns a compact payload with `first_msg`, `last_msg`, and `summary` so the model can verify state without ingesting a full raw message dump
+- generic tools tolerate stray `wait_for_previous` fields instead of failing on historical schema drift
+- `subscribe_for_duration` returns a compact payload with `first_msg`, `last_msg`, and `summary`
 
-The boundary was chosen to preserve three properties:
+These are interface stabilizations, not semantic flight primitives.
 
-- task sufficiency: the agent can still complete `T1-T4` using ROS-level primitives only
-- non-semantic control: the agent cannot collapse the task into high-level flight calls such as `takeoff()`, `goto()`, or mission executors
-- failure interpretability: errors remain attributable to prompt reasoning, message construction, frame handling, or offboard timing rather than to hidden controller abstractions
+## 7. Conditions
 
-This boundary is shared by `C0` and `C1`. `C2` keeps the same generic boundary and adds only a frozen helper subset justified by repeated discovery failures.
-
-## 3. Condition Design
-
-| Condition | Tool surface | Prompt context | Helper layer | Purpose |
+| Condition | Tool surface | Prompt context | Helper layer | Intended role |
 | --- | --- | --- | --- | --- |
-| `C0` | Generic ROS-MCP only | No | None | raw baseline |
-| `C1` | Same as `C0` | Yes | None | prompt-only improvement |
-| `C2` | Same as `C1` | Yes | Frozen minimal helper subset | minimum required low-layer |
+| `C0` | generic ROS-MCP only | none beyond connection context | none | raw generic baseline |
+| `C1` | same as `C0` | five operational facts | none | prompt-only repair attempt |
+| `C2` | same generic surface | same as `C1` | frozen minimal helper subset | minimum required transport and safety support |
 
 ### C0
 
-- Generic ROS-MCP tools only
-- No drone-operation hints beyond connection context
+`C0` must remain runnable, but not informed by drone-operation hints.
+Its condition artifact therefore does only three things:
+
+- names the condition
+- restricts the agent to the exposed IMECE tools
+- tells the agent to inspect the approved surface before acting
+
+This is a runnable baseline, not an impossible blind baseline.
 
 ### C1
 
-- Same tool surface as `C0`
-- Adds only concise operational facts:
-  - local position is `ENU`
-  - `OFFBOARD` requires setpoint prestream before mode switch
-  - setpoint streaming must continue during flight
-  - ambiguity should trigger a short clarification question
-  - final descent should prefer `LAND` mode
+`C1` adds exactly five operational facts:
+
+- local position is `ENU`
+- `OFFBOARD` requires setpoint prestream before mode switch
+- setpoint streaming must continue during flight
+- ambiguity should trigger one short clarification question
+- final descent should prefer `LAND` mode
+
+`C1` is intentionally not "best possible prompting." It is the smallest allowed prompt-only repair.
 
 ### C2
 
-- Same ROS interface surface as `C1`
-- Adds a frozen subset of non-semantic helpers only after discovery pilots show repeated failures that prompt/context alone cannot address
+`C2` keeps the same generic surface and prompt basis as `C1`, then adds only a frozen helper subset justified by repeated discovery failures.
 
-### Allowed Helper Catalog for C2
+#### Allowed Helper Catalog
 
 - `setpoint_relay`
   - maintains the last valid local pose target at `20 Hz`
 - `frame_guard`
-  - normalizes `ENU` local pose conventions and rejects obvious frame/sign inconsistencies
+  - normalizes `ENU` local-pose conventions and rejects obvious frame/sign inconsistencies
 - `mode_guard`
-  - enforces the minimum safe order: prestream -> `OFFBOARD` -> arm -> `LAND`
+  - enforces the minimum safe sequence: prestream -> `OFFBOARD` -> arm -> `LAND`
 - `abort_watchdog`
-  - triggers `LAND` on timeout or abort path
+  - forces `LAND` on timeout or runner-abort path
 
-The helper catalog is larger than the currently frozen subset. The preserved discovery analysis currently freezes:
+#### Currently Frozen Subset
 
 - `setpoint_relay`
 - `mode_guard`
 - `abort_watchdog`
 
-`frame_guard` remains implemented but is not part of the current frozen subset because the preserved discovery audit does not show repeated explicit frame/sign failures under the current classifier.
+`frame_guard` remains implemented but is not part of the currently frozen subset because the preserved discovery audit does not show repeated explicit frame/sign failures under the current classifier.
 
-### Forbidden Helper Behavior
+#### Forbidden Helper Behavior
 
 - automatic altitude choice
 - automatic waypoint or mission generation
-- path generators such as `square`, `triangle`, or `return-home`
-- behavior trees or mission executors that hide multiple semantic flight steps behind one call
+- path generators such as square, triangle, or return-home
+- behavior trees or mission executors that hide multi-step flight semantics behind one call
 
-## 4. Failure Taxonomy
+## 8. Failure Taxonomy
 
 ### F1. Ambiguity
 
 - unclear direction, distance, altitude, or stopping criterion
-- body/world reference confusion in user wording
-- missing information that should trigger clarification or safe refusal
+- wording that should trigger clarification or refusal
 
 ### F2. Tool or Interface Misuse
 
-- wrong topic or service selected
-- required state inspection omitted
-- incorrect use of ROS interface structure
+- wrong topic or service
+- incorrect ROS interface usage
+- invalid tool parameterization
 
 ### F3. Message or Frame Error
 
-- missing message fields
-- wrong message type or units
-- sign or frame inconsistency under `ENU` local pose conventions
+- wrong message fields, units, or frame/sign conventions under local `ENU`
 
 ### F4. Offboard or Timing Failure
 
-- mode switch before setpoint prestream
-- setpoint stream too sparse or interrupted
-- reasoning delay causes `OFFBOARD` rejection or drop
+- insufficient prestream
+- sparse or interrupted setpoint streaming
+- `OFFBOARD` rejection or drop caused by ordering or timing
 
 ### F5. Recovery or Safety Abort
 
-- stale plan persists after state change
-- correction prompt is mishandled
-- timeout, geofence stop, watchdog landing, or operator takeover occurs
+- timeout
+- operator intervention
+- watchdog-triggered landing
+- failed interrupt handling
 
-## 5. Task Design
+## 9. Task Set
 
-### Main Simulation Tasks
+### Simulation Tasks
 
-#### T1. Takeoff-Hover-Land
+| Task | Title | Canonical prompt | Experimental role |
+| --- | --- | --- | --- |
+| `T1` | Takeoff Hover Land | `Take off to one meter, hover for five seconds, then land.` | basic offboard takeoff, hover, landing |
+| `T2` | Short Translation | `Take off, move one meter forward, hover, and land.` | short local translation |
+| `T3` | Square Pattern Flight | `Take off, fly a square with one-meter sides, return near the start, and land.` | repeated multi-step local waypoint sequencing |
+| `T4` | Mid-flight Interrupt Handling | `Take off and move forward one meter.` | interruption, correction, and safe termination |
 
-- canonical prompt: `Take off to one meter, hover for five seconds, then land.`
+`T3` is derived from the first sampled local pose rather than an assumed world origin.
+`T4` uses deterministic correction prompts:
 
-#### T2. Short Translation
+- odd episodes: `Stop there.`
+- even episodes: `Land now.`
 
-- canonical prompt: `Take off, move one meter forward, hover, and land.`
-- the initial yaw is aligned with world `+x` so that `forward` is well defined
-
-#### T3. Square Pattern Flight
-
-- canonical prompt: `Take off, fly a square with one-meter sides, return near the start, and land.`
-- the square is executed with local-pose waypoints only; no semantic pattern or mission helper is introduced
-- the square is derived from the first sampled local pose rather than an assumed world origin
-- this task replaces the earlier ambiguity probe because the study is focused on the minimum control layer required for novice-requested flight behavior
-
-#### T4. Mid-flight Interrupt Handling
-
-- base prompt: `Take off and move forward one meter.`
-- the first turn must execute only the initial half-meter segment and hold there
-- once the halfway hold is stable, the agent must end the turn with `CLARIFY: awaiting correction`
-- the scheduled correction prompt is then sent in the same Gemini session as the second turn
-- deterministic interrupt rotation:
-  - odd-numbered episodes: `Stop there.`
-  - even-numbered episodes: `Land now.`
-
-### Controlled Real-flight Tasks
+### Real-flight Tasks
 
 - `R1`: takeoff-hover-land
 - `R2`: short translation
 
-`T4` is a simulation gate for mid-flight interrupt handling and abort safety. It is not part of the official real-flight task set.
+`T4` is a simulation-only safety gate and is not part of the official real-flight task set.
 
-## 6. Multi-turn Policy
+## 10. Success Criteria
 
-### Clarification Policy
-
-- if the agent asks a clarification question, the human may answer in freeform natural language
-- the reply must be at most one sentence
-- the reply must answer only the missing information requested by the agent
-- the reply must not add extra hints about ROS interfaces, flight modes, or implementation details
-- both the question and the human reply are logged
-
-### Success Criteria
-
-#### Shared
+### Shared
 
 - episode timeout: `120 s`
-- no operator intervention for success
-- success is judged from logged state and task-specific criteria only
-- each episode begins from a runner-normalized landed/disarmed baseline before the first Gemini turn
+- fresh Gemini session per official episode
+- success judged from logged state and task-specific criteria
+- each episode starts from a runner-normalized landed/disarmed baseline
 
-#### T1 / R1
+### T1 / R1
 
-- reach target altitude near `1.0 m`
-- maintain hover for `5 s`
+- reach about `1.0 m`
+- hold hover for `5 s`
 - land safely
 
-#### T2 / R2
+### T2 / R2
 
 - reach the commanded local translation of `1.0 m`
-- final position error after the translation target: `<= 0.25 m`
-
-#### T3
-
-- fly a square with one-meter sides using motion in both local `x` and local `y`
-- reach the takeoff hold, three square corners, and return hold in order, using a start-relative local `ENU` square
-- return near the start pose before landing
+- final translation error `<= 0.25 m`
 - land safely
 
-#### T4
+### T3
 
-- the interrupt prompt is handled safely
-- the resulting behavior matches the interrupt intent
-- no operator intervention occurs
+- reach the takeoff hold, three square corners, and return hold in order
+- use a start-relative local `ENU` square with one-meter sides
+- return near the start pose
+- land safely
 
-## 7. Experimental Phases
+### T4
+
+- handle the correction prompt safely
+- end with behavior matching the interrupt intent
+- avoid operator intervention
+
+## 11. Experimental Phases
 
 ### Discovery Pilot
 
 - conditions: `C0`, `C1`
 - tasks: `T1-T4`
-- repetitions: `5` per task per condition
-- goal: identify repeated failures and decide whether `C2` is necessary
+- repetitions: `5`
+- goal: identify repeated failures and decide whether `C2` is justified
 
-### C2 Freeze Rule
+### C2 Freeze Confirmation Rule
 
-- helper selection changes only between pilot batches
-- once `T3` was promoted to the square-pattern task, the `C2` confirmation batch also had to cover `T3`
-- the `C2` subset is frozen once one complete pilot batch of `T1-T4` with `5` repetitions each produces no helper change request
+- helper selection may change only between pilot batches
+- once `T3` became the square-pattern task, any full `C2` confirmation batch had to cover `T1-T4`
+- a fully symmetric `C2` confirmation batch means `C2 x T1-T4 x 5`
+- the current preserved evidence is narrower: discovery plus targeted `C2:T3` validation
 
-### Official Simulation Evaluation
+### Official Simulation
 
 - conditions: `C0`, `C1`, `C2`
 - tasks: `T1-T4`
-- repetitions: `10` per task per condition
-- launch a fresh Gemini session per episode
-- change no helper, prompt, or policy during this phase
+- repetitions: `10`
+- no prompt, helper, or policy change during the phase
 
 ### Real-flight Promotion Gate
 
@@ -283,31 +297,101 @@ Promote only the lowest-support condition that satisfies all of the following:
 - `T1` success rate `>= 8/10`
 - `T2` success rate `>= 8/10`
 - `T4` safe interrupt or abort success rate `>= 8/10`
-- critical safety failures in the final gate batch: `0`
+- critical safety failures in the gate batch: `0`
 
-### Official Real-flight Evaluation
+### Official Real Flight
 
 - promoted condition only
 - tasks: `R1`, `R2`
-- repetitions: `5` per task
-- environment: indoor mocap
+- repetitions: `5`
+- indoor mocap environment
 
-### Current Automation Status
+### Current Execution Status
 
-- `discovery`, `c2_freeze`, and `official_sim` are automated by the current runner
-- `official_real` is not automated as a batch phase in `run-phase`
-- a single-episode real-flight scaffold is available through `run-real-episode`
-- this is intentional: real-flight batching is not required for the current study stage
-- the current real-flight automation boundary is therefore:
-  - automate prompt construction, Gemini session execution, logging, and metrics capture
-  - keep operator go/no-go, airspace confirmation, and takeover readiness manual
-- the runner loads missing variables from the repo-local `.env` file before launching Gemini CLI, so `GEMINI_API_KEY=...` may be supplied through `.env`
-- the current preserved evidence is sufficient to start `official_sim` if it is described honestly:
-  - discovery justifies the frozen `C2` subset
-  - preserved targeted validation confirms the remaining `T3` gap under that subset
-  - this is not the same claim as “full `C2` validation across all of `T1-T4`”
+- `discovery`, `c2_freeze`, and `official_sim` are automated in the runner
+- real flight currently has a single-episode scaffold through `run-real-episode`
+- the current preserved evidence is sufficient to start `official_sim`
+- `official_real` should begin only after the promotion gate is satisfied
 
-## 8. Metrics and Metadata
+## 12. Repository Map
+
+### Documentation
+
+| Path | Role |
+| --- | --- |
+| [`docs/imece/implementation.md`](./implementation.md) | normative study specification and code map |
+| [`docs/imece/experiment-record.md`](./experiment-record.md) | preserved experiment history, results, and paper-facing interpretation |
+| [`docs/imece/runbook.md`](./runbook.md) | execution steps, command examples, and argument meanings |
+| [`docs/imece/agent-development-guide.md`](./agent-development-guide.md) | instructions for future agents that analyze batches and update the docs |
+| [`docs/imece/design-rationale.md`](./design-rationale.md) | legacy redirect file; rationale now lives in the main docs |
+
+### Configuration Artifacts
+
+| Path | Role |
+| --- | --- |
+| [`config/imece/c0.md`](../../config/imece/c0.md) | raw generic baseline condition prompt block |
+| [`config/imece/c1.md`](../../config/imece/c1.md) | prompt-only repair condition prompt block |
+| [`config/imece/c2.md`](../../config/imece/c2.md) | shared `C2` helper guidance fragment |
+| [`config/imece/c2_freeze.json`](../../config/imece/c2_freeze.json) | runtime mirror of the frozen helper subset |
+| [`config/imece/gemini-policy.toml`](../../config/imece/gemini-policy.toml) | Gemini tool policy used by the runner |
+
+### Runtime Code
+
+| Path | Role |
+| --- | --- |
+| [`ros_mcp/imece/server.py`](../../ros_mcp/imece/server.py) | IMECE-scoped ros-mcp server entrypoint |
+| [`ros_mcp/imece/constants.py`](../../ros_mcp/imece/constants.py) | allowed topics, services, helper names, defaults |
+| [`ros_mcp/imece/boundary_tools.py`](../../ros_mcp/imece/boundary_tools.py) | filtered generic tools and compact subscription payloads |
+| [`ros_mcp/imece/helpers.py`](../../ros_mcp/imece/helpers.py) | `setpoint_relay`, `frame_guard`, `mode_guard`, `abort_watchdog` |
+| [`ros_mcp/imece/config.py`](../../ros_mcp/imece/config.py) | task specs, prompt assembly, deterministic `T4` interrupt rotation |
+| [`ros_mcp/imece/gemini.py`](../../ros_mcp/imece/gemini.py) | Gemini CLI turn execution and trace capture |
+| [`ros_mcp/imece/rosbridge.py`](../../ros_mcp/imece/rosbridge.py) | rosbridge request and subscribe helpers used by the runner and monitor |
+| [`ros_mcp/imece/monitor.py`](../../ros_mcp/imece/monitor.py) | runtime state capture used for scoring and diagnostics |
+| [`ros_mcp/imece/scoring.py`](../../ros_mcp/imece/scoring.py) | task success logic shared by runtime and offline audit |
+| [`ros_mcp/imece/analysis.py`](../../ros_mcp/imece/analysis.py) | failure classification, helper selection, audit generation |
+| [`ros_mcp/imece/runner.py`](../../ros_mcp/imece/runner.py) | CLI entrypoint for episode, batch, phase, analysis, and audit workflows |
+
+### Scripts
+
+| Path | Role |
+| --- | --- |
+| [`scripts/imece/setup_gemini_project_mcp.sh`](../../scripts/imece/setup_gemini_project_mcp.sh) | project-local Gemini MCP configuration |
+| [`scripts/imece/start_sim_stack.sh`](../../scripts/imece/start_sim_stack.sh) | PX4, MAVROS, and rosbridge bring-up |
+| [`scripts/imece/stop_sim_stack.sh`](../../scripts/imece/stop_sim_stack.sh) | simulation shutdown |
+
+### Tests
+
+| Path | Role |
+| --- | --- |
+| [`tests/imece/test_boundary_surface.py`](../../tests/imece/test_boundary_surface.py) | control-surface allowlist behavior |
+| [`tests/imece/test_boundary_tools.py`](../../tests/imece/test_boundary_tools.py) | compact subscription payload behavior |
+| [`tests/imece/test_prompts.py`](../../tests/imece/test_prompts.py) | prompt assembly and task-specific instructions |
+| [`tests/imece/test_helpers.py`](../../tests/imece/test_helpers.py) | helper-layer behavior |
+| [`tests/imece/test_analysis.py`](../../tests/imece/test_analysis.py) | failure taxonomy, audit, and freeze logic |
+| [`tests/imece/test_runner_batch.py`](../../tests/imece/test_runner_batch.py) | batch execution and artifact writing |
+| [`tests/imece/test_gemini.py`](../../tests/imece/test_gemini.py) | Gemini runner integration contract |
+| [`tests/imece/test_policy.py`](../../tests/imece/test_policy.py) | Gemini policy loading and application |
+
+### Artifacts
+
+`artifacts/imece/<batch_id>/` is the batch output root.
+Per-episode outputs include:
+
+- `prompt.txt`
+- `gemini.jsonl`
+- `gemini.stderr.log`
+- `monitor.jsonl`
+- `metrics.json`
+- `metadata.json`
+- `rosbag/`
+
+Per-batch outputs include:
+
+- `batch_state.json`
+- `analysis.json`
+- `audit.json`
+
+## 13. Metrics, Metadata, and Logging
 
 ### Primary Metrics
 
@@ -328,78 +412,52 @@ Promote only the lowest-support condition that satisfies all of the following:
 - final pose error
 - `T3` square waypoint count and completion flag
 
-### Metadata
+### Required Runtime Metadata
 
 - repo commit SHA
+- ros-mcp repo commit SHA
+- PX4 commit SHA
 - Gemini CLI version
 - actual routed model
-- account tier if observable
-- ros-mcp version or commit
-- PX4, MAVROS, and Gazebo revision information
+- MAVROS version
+- Gazebo version
+- ROS distro
 
-These are stored at episode scope under `metadata.json` as `runtime_metadata`. Batch scope caveats are written to `analysis.json` and `audit.json`.
-
-Preserved discovery artifacts predate this metadata capture. Their missing fields are surfaced in `audit.json` under `reproducibility_metadata` and should be described as a limitation rather than backfilled.
-
-## 9. Procedure and Safety
-
-### Episode Procedure
-
-1. reset the simulator or real-flight environment
-2. verify `PX4 <-> MAVROS <-> ROS2 <-> ros-mcp` connectivity
-3. verify the fixed repo commit on the execution machine
-4. start `rosbag` and metadata logging
-5. launch a fresh Gemini CLI session with the condition-specific prompt and tool allowlist
-6. send the initial user prompt
-7. answer clarification requests under the one-sentence rule
-8. for `T4`, inject the scheduled correction prompt at the deterministic trigger
-9. allow tool use until success, failure, operator takeover, watchdog landing, or timeout
-10. stop logs and compute metrics
+Preserved discovery artifacts predate this metadata capture and must be described as such rather than backfilled.
 
 ### Logging Requirements
 
-- full prompt and clarification history
-- Gemini CLI structured output or JSON trace
-- full tool invocation trace
-- all ROS service calls
-- all setpoint messages
-- state topic timeline
-- position, attitude, battery, and mode history
-- operator abort or takeover flag
-- watchdog-triggered land events
-- batch-level `analysis.json` and `audit.json` for current-scoring summaries, helper selection, historical interface mismatch, and stored-vs-current label drift
+- full first-turn prompt
+- clarification history
+- Gemini structured output
+- tool invocation trace
+- ROS service calls and setpoint activity
+- state and pose history
+- batch-level `analysis.json`
+- batch-level `audit.json`
+
+## 14. Procedure and Safety
+
+### Episode Procedure
+
+1. reset or verify the sim or real-flight environment
+2. verify `PX4 <-> MAVROS <-> ROS2 <-> ros-mcp` connectivity
+3. verify the intended repo state on the execution machine
+4. start logging and rosbag capture
+5. launch a fresh Gemini session
+6. send the initial prompt
+7. answer clarification under the one-sentence rule if needed
+8. for `T4`, inject the scheduled correction prompt
+9. stop only on success, refusal, operator takeover, watchdog landing, or timeout
+10. compute metrics and write batch analysis artifacts
 
 ### Real-flight Safety
 
 - manual takeover through RC or QGroundControl must remain available
 - `abort_watchdog` must trigger `LAND` on timeout or abort path
-- real-flight evaluation is centered inside the mocap safety volume
+- real-flight evaluation stays inside the mocap safety volume
 - fixed task envelope:
-  - takeoff altitude: `1.0 m`
-  - horizontal translation: `1.0 m`
-  - hover duration: `5 s`
-- actual geofence and ceiling values are execution-machine environment facts and must be measured and written into the run configuration before real-flight trials
-
-### Real-flight Outputs to Preserve
-
-Even before `official_real` is automated, the intended real-flight outputs are already fixed:
-
-- primary outcomes:
-  - task success
-  - operator-intervention-free success
-  - completion time
-- safety outcomes:
-  - timeout
-  - watchdog-triggered land
-  - operator takeover or abort
-  - `OFFBOARD` rejection or drop
-- motion outcomes:
-  - altitude reached for `R1`
-  - hover duration achieved for `R1`
-  - translation error for `R2`
-- environment and provenance:
-  - repo commit
-  - routed model
-  - PX4, MAVROS, Gazebo, and ros-mcp revisions
-  - actual geofence and ceiling values
-  - mocap-space note for the run
+  - altitude: `1.0 m`
+  - translation: `1.0 m`
+  - hover: `5 s`
+- actual geofence and ceiling values must be measured and recorded before real-flight trials

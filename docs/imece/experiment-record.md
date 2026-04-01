@@ -1,72 +1,102 @@
 # IMECE Experiment Record
 
-This document is the detailed record of the preserved IMECE experiments. It is intended to support paper writing by keeping the staged argument, task prompts, automation settings, and preserved evidence in one place.
+This document records what was actually run, what was preserved, how those artifacts were analyzed, and what paper claims are supported by the preserved evidence.
 
-`implementation.md` is still the normative specification. This file records what was actually preserved and why the current `C0`, `C1`, `C2`, `T1`, `T2`, `T3`, and `T4` definitions look the way they do.
+Use this file for:
 
-## 1. Preserved Artifact Set
+- preserved batch history
+- the exact condition and prompt setup used in preserved evidence
+- machine-generated summaries and how they should be read
+- paper-safe result statements and current limitations
 
-Only the following experiment batches are currently preserved as paper-facing evidence:
+[`implementation.md`](./implementation.md) remains the normative specification.
+If the two documents diverge, this file should explain the preserved reality and `implementation.md` should explain the intended rule.
+
+## 1. Preserved Evidence Boundary
+
+The following preserved batches are the current paper-facing evidence:
 
 | Batch ID | Phase meaning | Preserved purpose | Artifact root |
 | --- | --- | --- | --- |
-| `discovery-20260331` | discovery pilot | justify whether `C2` is needed and which helpers may be frozen | `artifacts/imece/discovery-20260331/` |
-| `c2-freeze-t3-20260331` | targeted `C2` validation | validate the remaining `T3` square-pattern gap under the frozen `C2` layer | `artifacts/imece/c2-freeze-t3-20260331/` |
+| `discovery-20260331` | discovery pilot | determine whether `C2` is needed and which helpers can be frozen | `artifacts/imece/discovery-20260331/` |
+| `c2-freeze-t3-20260331` | targeted `C2` validation | validate the remaining `T3` square-pattern gap under the frozen `C2` subset | `artifacts/imece/c2-freeze-t3-20260331/` |
+| `official-sim-001` | official simulation evaluation | compare `C0`, `C1`, and `C2` head-to-head on the final `T1-T4` task set | `artifacts/imece/official-sim-001/` |
 
-These two preserved batches are the ones that should be cited when describing the staged design process so far.
+These are the only preserved batches that should be cited as direct evidence in the paper right now.
 
-Deleted ad hoc or superseded runs are intentionally not part of the preserved argument. The paper should not rely on removed intermediate batches.
+Deleted ad hoc runs and superseded internal runs are not part of the paper-facing argument and should not be reconstructed into tables or claims.
 
-Each preserved batch now has two machine-generated summaries:
+## 2. Machine-generated Analysis Outputs
+
+Each preserved batch has:
 
 - `analysis.json`
-  - helper selection and freeze review derived from the current scoring and failure taxonomy
+  - batch summary under current scoring
+  - helper freeze review
+  - task success summary
 - `audit.json`
-  - fairness and reproducibility caveats for preserved artifacts, including historical interface mismatch and stored-vs-current task-success drift
+  - historical interface mismatch counts
+  - stored-vs-current task-success drift
+  - reproducibility metadata coverage
 
-The preserved discovery batch predates top-level runtime metadata capture. The preserved targeted `C2:T3` validation batch includes complete episode-level `runtime_metadata` in `metadata.json`.
+Important differences across preserved batches:
 
-## 2. Current Study Snapshot
+- preserved discovery predates top-level runtime metadata capture
+- preserved `c2-freeze-t3-20260331` has complete per-episode `runtime_metadata`
+- preserved `official-sim-001` has complete per-episode `runtime_metadata` and no historical interface mismatch contamination
 
-The current preserved study shape is:
+## 3. Current Study Snapshot
 
-- conditions:
-  - `C0`: generic ROS-MCP baseline
-  - `C1`: prompt-only operational facts added to the same generic surface
-  - `C2`: same generic surface plus a frozen minimal helper layer
-- simulation tasks:
+### Conditions
+
+- `C0`: generic ROS-MCP baseline
+- `C1`: prompt-only operational facts on the same generic surface
+- `C2`: same generic surface plus the frozen minimal helper subset
+
+### Tasks
+
+- simulation:
   - `T1`: Takeoff Hover Land
   - `T2`: Short Translation
   - `T3`: Square Pattern Flight
   - `T4`: Mid-flight Interrupt Handling
-- real-flight tasks:
+- real flight:
   - `R1`: takeoff-hover-land
   - `R2`: short translation
 
-The important historical detail is that an earlier ambiguity probe was removed from the final preserved task set. The current preserved study no longer uses an ambiguity task as `T4`. The final mapping used by the preserved artifacts is:
+### Historical Note
+
+An earlier ambiguity-oriented draft task was retired.
+The preserved final mapping is:
 
 - `T3 = Square Pattern Flight`
 - `T4 = Mid-flight Interrupt Handling`
 
-## 3. Why the Conditions Were Designed This Way
+The paper should use only this final mapping.
 
-### C0: Raw Generic ROS Baseline
+## 4. Condition Record
 
-`C0` exists to answer the narrow question: what happens if the agent is given only the generic ROS-MCP surface inside the IMECE boundary, with no drone-operation hints beyond connection context?
+### C0
 
-The actual `C0` condition artifact is [`config/imece/c0.md`](../../config/imece/c0.md). It does only three things:
+Condition artifact: [`config/imece/c0.md`](../../config/imece/c0.md)
 
-- states that the agent is in `C0`
-- says to use only the exposed generic ROS MCP tools
-- tells the agent to connect to the robot and inspect the approved topics or services first
+What the agent receives:
 
-This last point matters. `C0` is not meant to be an impossible blind baseline. It is meant to be a runnable generic baseline. That is why a connection/discovery instruction is present while drone-operation hints are not.
+- condition name
+- instruction to use only the exposed IMECE tools
+- instruction to inspect the approved ROS surface first
 
-### C1: Prompt-only Repair Attempt
+Why this matters:
 
-`C1` was designed to test whether the failures seen in `C0` could be repaired by prompt context alone, without changing the tool surface.
+- `C0` is a runnable generic baseline
+- it is not a drone-aware baseline
+- it is not an impossible blind baseline
 
-The actual `C1` condition artifact is [`config/imece/c1.md`](../../config/imece/c1.md). It adds exactly five operational facts:
+### C1
+
+Condition artifact: [`config/imece/c1.md`](../../config/imece/c1.md)
+
+Additional prompt facts:
 
 - local position is `ENU`
 - `OFFBOARD` requires setpoint prestream before mode switch
@@ -74,367 +104,471 @@ The actual `C1` condition artifact is [`config/imece/c1.md`](../../config/imece/
 - ambiguity should trigger a short clarification question
 - final descent should prefer `LAND` mode
 
-`C1` is intentionally narrow. It is not “best possible prompting.” It is “smallest allowed prompt-only repair.” That methodological choice matters for the paper:
+Why this matters:
 
-- if `C1` had worked, then `C2` would not have been justified
-- if `C1` still failed, the remaining failures would become candidates for a minimal helper layer
+- `C1` is the smallest prompt-only repair
+- if `C1` had repaired the failures, `C2` would not be justified
 
-### C2: Minimal Helper Layer Frozen from Discovery
+### C2
 
-`C2` was not designed first. It was frozen only after repeated discovery evidence showed that prompt context alone did not repair the remaining low-level transport and safety gaps.
+Condition artifacts:
 
-The single source of truth for the frozen subset is the discovery selection in [`artifacts/imece/discovery-20260331/analysis.json`](../../artifacts/imece/discovery-20260331/analysis.json). [`config/imece/c2_freeze.json`](../../config/imece/c2_freeze.json) is a runtime mirror of that selection and is kept synchronized from the batch analysis output.
+- [`config/imece/c2.md`](../../config/imece/c2.md)
+- [`config/imece/c2_freeze.json`](../../config/imece/c2_freeze.json)
 
-The current frozen helper subset is:
+Current frozen helper subset:
 
 - `setpoint_relay`
 - `mode_guard`
 - `abort_watchdog`
 
-This selection is tied to repeated post-`C1` failure classes, not convenience:
+Important qualification:
 
-- `setpoint_relay`
-  - selected because setpoint streaming and timing failures kept recurring
-  - keeps the last valid local pose target alive at `20 Hz`
-- `mode_guard`
-  - selected because `prestream -> OFFBOARD -> arm` ordering failures kept recurring
-  - exposes only guarded offboard engage and guarded land
-- `abort_watchdog`
-  - selected because timeout and abort safety gaps were observed
-  - forces `LAND` on timeout or lost runner heartbeat
+- `frame_guard` exists in code but is not part of the currently frozen subset
+- the preserved discovery audit does not show repeated explicit frame/sign failures under the current classifier
 
-`frame_guard` remains implemented in the helper catalog, but the preserved discovery audit does not contain repeated explicit frame/sign failures under the current classifier. It is therefore not part of the currently frozen subset and should not be described as discovery-frozen evidence in the paper.
+This is the paper-safe way to describe `C2`:
 
-No semantic helper such as `takeoff()`, `goto()`, `return_home()`, or `fly_square()` was added.
+- a frozen minimal low-level helper subset
+- not a semantic drone API layer
+- not a mission planner
 
-## 4. Discovery Evidence That Motivated C2
+## 5. Why `C0 -> C1 -> C2` Was Designed This Way
 
-The preserved discovery matrix is [`artifacts/imece/discovery-20260331/`](../../artifacts/imece/discovery-20260331/).
+The staged condition design was not chosen abstractly. It was chosen because the preserved discovery traces showed a specific progression.
 
-Its batch summary is in [`batch_state.json`](../../artifacts/imece/discovery-20260331/batch_state.json):
+| Condition | Preserved log evidence | Design implication |
+| --- | --- | --- |
+| `C0` | [`C0/T1/episode-01/metrics.json`](../../artifacts/imece/discovery-20260331/C0/T1/episode-01/metrics.json) records `44` tool calls, `9` setpoints, `max_altitude_m = 0.0245`, `offboard_rejection_count = 4`, `timed_out = true`, `watchdog_triggered = true`. | `C0` needed to remain runnable as a generic ROS baseline, not an impossible blind baseline. |
+| `C1` | [`C1/T1/episode-02/gemini.jsonl`](../../artifacts/imece/discovery-20260331/C1/T1/episode-02/gemini.jsonl) shows the model explicitly reasoning about prestream and continuous streaming, but the preserved tool outputs contain `wait_for_previous` validation drift and later only `published_count = 1` for multi-second publish windows. [`metrics.json`](../../artifacts/imece/discovery-20260331/C1/T1/episode-02/metrics.json) records `setpoint_count = 4` and `max_altitude_m = 0.0291`. | `C1` had to remain the smallest prompt-only repair so the study could show that reasoning improved while the mechanism still failed. |
+| `C2` | Discovery freezes only `setpoint_relay`, `mode_guard`, and `abort_watchdog`; targeted `C2:T3` then validates the remaining square-pattern gap; later `official-sim-001` shows `C2` removing the recurrent `F1-F5` pattern while leaving only a few task-criterion misses. | `C2` had to be a thin low-level stabilization layer, not a semantic mission interface. |
 
-- phase: `discovery`
+Three design points matter for the paper narrative:
+
+- `C0` still includes connection/discovery because otherwise the baseline would collapse into blind failure rather than generic ROS-level interaction.
+- `C1` is intentionally narrow because the study needs a clean prompt-only repair attempt, not an unconstrained prompting contest.
+- `C2` was frozen only after discovery showed that prompt context alone did not fix the transport/timing and abort path.
+
+The preserved `C1/T1/episode-02` trace is the clearest justification for the transition from `C1` to `C2`. The model says it will prestream setpoints and maintain streaming, but the preserved tool results either fail on historical schema drift or report only one published setpoint for a multi-second publish window. This is why the paper-safe discovery conclusion is:
+
+- `C1` improved reasoning
+- `C1` did not reliably repair the mechanism
+- the remaining gap justified a thin helper layer tied only to transport and safety
+
+## 6. Prompt Assembly and Task Prompt Record
+
+The first-turn prompt is assembled by [`ros_mcp/imece/config.py`](../../ros_mcp/imece/config.py) in this order:
+
+1. shared contract
+2. condition artifact
+3. `C2` helper block if the condition is `C2`
+4. task-specific execution block if the task has one
+5. episode metadata
+6. canonical task prompt
+
+This matters experimentally because each episode preserves the exact delivered text in `prompt.txt`.
+
+### Shared Contract Held Constant
+
+Across the preserved runs, the first-turn prompt keeps these shared requirements:
+
+- use only the exposed IMECE tools
+- ask one short clarification question if necessary
+- refuse briefly if the request cannot be completed safely
+- end every turn with exactly one of `CLARIFY: ...`, `REFUSE: ...`, or `DONE: ...`
+
+### Task Prompt Record
+
+| Task | Title | Canonical prompt | Experimentally important task-specific setting |
+| --- | --- | --- | --- |
+| `T1` | Takeoff Hover Land | `Take off to one meter, hover for five seconds, then land.` | no extra task block |
+| `T2` | Short Translation | `Take off, move one meter forward, hover, and land.` | exactly two motion targets: takeoff hold, then one-meter-forward hold |
+| `T3` | Square Pattern Flight | `Take off, fly a square with one-meter sides, return near the start, and land.` | exactly five start-relative local-pose targets |
+| `T4` | Mid-flight Interrupt Handling | `Take off and move forward one meter.` | first turn ends with `CLARIFY`, second turn receives deterministic correction |
+
+Additional task settings held fixed in the preserved study:
+
+- `T2`
+  - use exactly two motion targets
+  - do not retarget until the takeoff hold is reached
+- `T3`
+  - derive the square from the first sampled local pose
+  - use exactly five motion targets
+  - verify through `subscribe_for_duration`
+  - emit exactly `DONE: square complete`
+- `T4`
+  - first turn uses takeoff hold then halfway-forward hold
+  - first turn ends with `CLARIFY: awaiting correction`
+  - deterministic correction rotation:
+    - odd episodes: `Stop there.`
+    - even episodes: `Land now.`
+
+## 7. Phase-by-phase Record
+
+### Phase A. Discovery Pilot
+
+Artifact root: [`artifacts/imece/discovery-20260331/`](../../artifacts/imece/discovery-20260331/)
+
+Purpose:
+
+- decide whether generic-only or prompt-only conditions are enough
+- identify repeated failure families
+- justify or reject a frozen `C2` layer
+
+Matrix:
+
+- conditions: `C0`, `C1`
+- tasks: `T1`, `T2`, `T3`, `T4`
+- repetitions: `5`
+- total: `40`
+
+Preserved summary:
+
 - completed episodes: `40`
 - infrastructure failures: `0`
 - exhaustion count: `0`
 
-This matrix is exactly:
+Current-analysis result:
 
-- conditions: `C0`, `C1`
-- tasks: `T1`, `T2`, `T3`, `T4`
-- repetitions: `5` each
-- total: `2 x 4 x 5 = 40`
+- freeze selection counts:
+  - `F2 = 15`
+  - `F4 = 18`
+  - `F5 = 13`
+- historical generic-tool schema mismatch episodes: `30`
+- repeated explicit frame/sign error episodes under the current classifier: `0`
 
-The helper freeze decision recorded by the discovery analysis is in [`analysis.json`](../../artifacts/imece/discovery-20260331/analysis.json) and mirrored into [`config/imece/c2_freeze.json`](../../config/imece/c2_freeze.json). The preserved discovery selection counts are:
+Representative baseline failure:
 
-- `F2 = 15`
-- `F4 = 18`
-- `F5 = 13`
+- [`C0/T1/episode-01/metrics.json`](../../artifacts/imece/discovery-20260331/C0/T1/episode-01/metrics.json)
+  - `task_success = false`
+  - `failure_codes = ["F2", "F4", "F5"]`
+  - `max_altitude_m = 0.0245`
+  - `max_setpoint_gap_s = 25.00`
+  - `offboard_rejection_count = 4`
+  - `timed_out = true`
+  - `watchdog_triggered = true`
 
-The preserved discovery audit is in [`audit.json`](../../artifacts/imece/discovery-20260331/audit.json). It matters for how the paper should phrase results:
+Representative `C1` partial repair:
 
-- `30` preserved discovery episodes contain historical generic-tool schema mismatch (`wait_for_previous` validation drift)
-- the current classifier finds `0` repeated explicit frame/sign errors in the preserved discovery tree
-- stored artifact labels should not be used blindly when current task rules differ; use the audit and current scoring summaries instead
+- [`C1/T1/episode-01/metrics.json`](../../artifacts/imece/discovery-20260331/C1/T1/episode-01/metrics.json)
+  - `task_success_current_spec = true`
+  - `failure_codes = ["F2", "F4", "F5"]`
+  - `max_altitude_m = 1.9835`
+  - `max_setpoint_gap_s = 10.14`
+  - `offboard_rejection_count = 6`
+  - `offboard_drop_count = 2`
+  - `timed_out = true`
+  - `watchdog_triggered = true`
 
-### Representative C0 Failure
+Critical log-based rationale episode:
 
-`C0/T1/episode-01` is representative of the raw baseline failure mode. See [`metrics.json`](../../artifacts/imece/discovery-20260331/C0/T1/episode-01/metrics.json):
+- [`C1/T1/episode-02/gemini.jsonl`](../../artifacts/imece/discovery-20260331/C1/T1/episode-02/gemini.jsonl)
+  - the model explicitly reasons about prestream and continuous streaming
+  - preserved tool results show historical `wait_for_previous` validation drift
+  - later successful publish calls still report only `published_count = 1`
 
-- `task_success = false`
-- `failure_codes = ["F2", "F4", "F5"]`
-- `max_altitude_m = 0.0245`
-- `max_setpoint_gap_s = 25.00`
-- `offboard_rejection_count = 4`
-- `timed_out = true`
-- `watchdog_triggered = true`
+How this phase was analyzed:
 
-This is the raw `C0` picture: the agent could access the generic surface, but repeated timing and safety failures prevented successful flight.
+- current task success is recomputed by shared scoring in [`ros_mcp/imece/scoring.py`](../../ros_mcp/imece/scoring.py)
+- failure codes are recomputed by [`ros_mcp/imece/analysis.py`](../../ros_mcp/imece/analysis.py)
+- helper selection is taken from `analysis.json.selection`
+- fairness and reproducibility caveats are taken from `audit.json`
 
-### Representative C1 Improvement and Residual Failure
+Discovery conclusion:
 
-`C1/T1/episode-01` shows the right qualitative pattern for the staged argument. See [`metrics.json`](../../artifacts/imece/discovery-20260331/C1/T1/episode-01/metrics.json):
+- `C1` improved operational reasoning
+- `C1` did not repair the low-level mechanism
+- repeated post-`C1` transport/timing and safety failures justify a minimal `C2` subset
+- current preserved discovery does not justify freezing `frame_guard`
 
-- `task_success_current_spec = true`
-- `failure_codes = ["F2", "F4", "F5"]`
-- `max_altitude_m = 1.9835`
-- `max_setpoint_gap_s = 10.14`
-- `offboard_rejection_count = 6`
-- `offboard_drop_count = 2`
-- `timed_out = true`
-- `watchdog_triggered = true`
+### Phase B. Targeted C2 Validation for T3
 
-This means `C1` improved some operational reasoning, but did not remove the transport/timing and safety gaps.
+Artifact root: [`artifacts/imece/c2-freeze-t3-20260331/`](../../artifacts/imece/c2-freeze-t3-20260331/)
 
-The discovery rationale is stronger when the qualitative trace is considered. In the preserved `C1` logs, the model explicitly reasoned about `OFFBOARD` prestream and continuous streaming, yet the generic publish path still produced sparse setpoint output. That is the key argument:
+Purpose:
 
-- `C1` improved reasoning
-- `C1` did not repair the mechanism itself
+- validate the remaining `T3` square-pattern gap under the frozen `C2` subset
 
-The paper should still be conservative here. Because the discovery audit flags widespread historical interface mismatch, the safe claim is qualitative and failure-class based, not “prompt-only success rate improved by X points.”
+Matrix:
 
-The implementation used for future `official_sim` runs stabilizes that shared generic surface in two narrow ways:
+- condition: `C2`
+- task: `T3`
+- repetitions: `5`
+- total: `5`
 
-- generic tools tolerate stray `wait_for_previous` fields instead of failing on schema drift
-- `subscribe_for_duration` returns a compact payload with `first_msg`, `last_msg`, and `summary` instead of dumping the full message window into the model context
+What was active:
 
-These changes do not rewrite the preserved discovery evidence. They exist so that `official_sim` starts from a stable common interface across `C0`, `C1`, and `C2`.
+- frozen helper subset from discovery:
+  - `setpoint_relay`
+  - `mode_guard`
+  - `abort_watchdog`
+- square-pattern task-specific execution block from the current prompt builder
 
-### Representative T3 Square Failure Before C2 Validation
-
-Once `T3` became the square-pattern task, discovery still showed the same low-level failure family. See [`metrics.json`](../../artifacts/imece/discovery-20260331/C1/T3/episode-01/metrics.json):
-
-- `task_success = false`
-- `failure_codes = ["F4", "F5"]`
-- `max_altitude_m = 1.8893`
-- `max_setpoint_gap_s = 13.45`
-- `offboard_rejection_count = 3`
-- `offboard_drop_count = 2`
-- `timed_out = true`
-- `watchdog_triggered = true`
-- `x_span_m = 0.1309`
-- `y_span_m = 0.1565`
-
-This is why `T3` changed the validation scope but did not justify a new helper class: the square-pattern failures still looked like the same transport/timing and timeout problems already motivating `setpoint_relay`, `mode_guard`, and `abort_watchdog`.
-
-## 5. C2 Validation Evidence Preserved So Far
-
-The preserved targeted `C2` validation batch is [`artifacts/imece/c2-freeze-t3-20260331/`](../../artifacts/imece/c2-freeze-t3-20260331/).
-
-Its batch summary is in [`batch_state.json`](../../artifacts/imece/c2-freeze-t3-20260331/batch_state.json):
+Preserved summary:
 
 - completed episodes: `5`
 - infrastructure failures: `0`
 - exhaustion count: `0`
 
-Its validation result is in [`analysis.json`](../../artifacts/imece/c2-freeze-t3-20260331/analysis.json):
+Current-analysis result:
 
 - `freeze_review.status = "validated"`
 - `freeze_review.task_success.T3.success = 5`
 - `freeze_review.task_success.T3.total = 5`
 
-Its reproducibility audit is in [`audit.json`](../../artifacts/imece/c2-freeze-t3-20260331/audit.json):
+Reproducibility result:
 
-- `episodes_with_runtime_metadata = 5`
-- `episodes_missing_runtime_metadata = []`
-- `field_coverage` includes repo commit, PX4 commit, Gemini CLI version, routed model, MAVROS version, Gazebo version, and ROS distro
+- episodes with runtime metadata: `5`
+- episodes missing runtime metadata: `[]`
+- full field coverage for repo commit, ros-mcp repo commit, PX4 commit, Gemini CLI version, routed model, MAVROS version, Gazebo version, and ROS distro
 
-This preserved batch exists because the final unresolved gap after the task-set update was the square-pattern task. The preserved conclusion is therefore:
+Validation conclusion:
 
-- discovery justified the frozen `C2` helper subset
-- the remaining `T3` square-pattern gap was then validated separately under that frozen subset
+- the frozen `C2` subset closes the remaining preserved `T3` gap
+- this is a targeted validation result, not a claim of full `C2:T1-T4` validation
 
-This is the current paper-safe stopping point. The preserved evidence supports:
+### Phase C. Official Simulation
 
-- discovery justified why a frozen `C2` layer was needed at all
-- the final frozen subset is `setpoint_relay`, `mode_guard`, `abort_watchdog`
-- the remaining `T3` gap was validated separately as `5/5` under that frozen subset
+Artifact root: [`artifacts/imece/official-sim-001/`](../../artifacts/imece/official-sim-001/)
 
-The preserved evidence does not yet support the stronger claim that `C2` has already been fully validated across the entire final `T1-T4` task set.
+Purpose:
 
-The paper should describe this honestly. The preserved artifact tree currently contains:
+- compare `C0`, `C1`, and `C2` head-to-head under the fixed final task set
+- determine whether any condition satisfies the promotion gate for real flight
 
-- one complete discovery pilot for `C0/C1`
-- one preserved `C2:T3` validation batch for the updated square-pattern task
+Matrix:
 
-It does not currently contain a single newly generated `C2` validation directory covering `T1-T4` together under the current task map. If that exact shape is needed later for presentation symmetry, it should be generated as a new preserved batch rather than reconstructed from deleted intermediates.
+- conditions: `C0`, `C1`, `C2`
+- tasks: `T1`, `T2`, `T3`, `T4`
+- repetitions: `10`
+- total: `120`
 
-Operationally, the study is now ready to proceed to `official_sim`. The reason is narrower than “full `C2` validation”: discovery justified the frozen helper subset, and the only remaining final-task gap after the task-map update was `T3`, which is now preserved as a separate `5/5` targeted validation batch under that frozen subset.
+What was held fixed:
 
-## 6. Current Prompt Assembly Rule
+- the final task set `T1-T4`
+- the frozen helper subset in [`config/imece/c2_freeze.json`](../../config/imece/c2_freeze.json)
+- the current shared generic tool surface
+- the current prompt assembly logic and Gemini policy
 
-The first-turn prompt delivered to Gemini is assembled automatically by [`ros_mcp/imece/config.py`](../../ros_mcp/imece/config.py). The current rule is:
+Preserved summary:
 
-1. shared contract
-2. condition artifact
-3. `C2` helper block if and only if the condition is `C2`
-4. task-specific execution block if the task has one
-5. episode metadata
-6. canonical task prompt
+- completed episodes: `120`
+- infrastructure failures: `0`
+- exhaustion count: `0`
+- overall pooled success across all conditions: `48/120 = 40.0%`
 
-This is the mechanism used by `run_episode()` in the simulation runner. It means the agent does not receive a partial template. It receives the full assembled first-turn prompt, and that exact text is stored in `prompt.txt` under each episode directory.
+Initial official comparison from `official-sim-001`:
 
-## 7. Current Task Prompt and Setting Matrix
+| Condition | Overall success | `T1` | `T2` | `T3` | `T4` |
+| --- | --- | --- | --- | --- | --- |
+| `C0` | `6/40 = 15.0%` | `5/10` | `0/10` | `0/10` | `1/10` |
+| `C1` | `6/40 = 15.0%` | `6/10` | `0/10` | `0/10` | `0/10` |
+| `C2` | `36/40 = 90.0%` | `7/10` | `10/10` | `10/10` | `9/10` |
 
-The current canonical task prompts come from [`ros_mcp/imece/config.py`](../../ros_mcp/imece/config.py).
+The pooled `48/120` number is not the main result. The condition-stratified table above is the paper-relevant comparison.
 
-| Task | Current title | Canonical prompt | Task-specific execution setting that matters experimentally |
-| --- | --- | --- | --- |
-| `T1` | Takeoff Hover Land | `Take off to one meter, hover for five seconds, then land.` | no extra task block; success is judged from altitude, hover, and safe landing |
-| `T2` | Short Translation | `Take off, move one meter forward, hover, and land.` | exactly two motion targets: takeoff hold, then one-meter-forward hold |
-| `T3` | Square Pattern Flight | `Take off, fly a square with one-meter sides, return near the start, and land.` | exactly five start-relative local-pose targets: takeoff hold, three new corners, and return hold |
-| `T4` | Mid-flight Interrupt Handling | `Take off and move forward one meter.` | first turn must stop at halfway hold and end with `CLARIFY`; second turn receives deterministic correction |
+Failure-pattern result in `official-sim-001`:
 
-### T1
+| Condition | `F1` | `F2` | `F3` | `F4` | `F5` | Historical interface mismatch | Explicit frame/sign error |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `C0` | `2` | `0` | `0` | `39` | `33` | `0` | `0` |
+| `C1` | `0` | `2` | `0` | `39` | `32` | `0` | `0` |
+| `C2` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
 
-- current canonical prompt:
-  - `Take off to one meter, hover for five seconds, then land.`
-- current clarification reply if needed:
-  - “Use the current local pose as the start, go to about one meter altitude, hover five seconds, then land.”
-- diagnostic role:
-  - basic takeoff, offboard engagement, hover, and landing
+Reproducibility result in `official-sim-001`:
 
-### T2
+- episodes with runtime metadata: `120`
+- episodes missing runtime metadata: `[]`
+- full coverage for repo commit, ros-mcp repo commit, PX4 commit, Gemini CLI version, routed model, MAVROS version, Gazebo version, and ROS distro
 
-- current canonical prompt:
-  - `Take off, move one meter forward, hover, and land.`
-- current clarification reply if needed:
-  - “Use local ENU with forward as +x, move one meter at about one meter altitude, hover briefly, then land.”
-- current task-specific settings:
-  - use exactly two motion targets
-  - do not retarget until the takeoff hold is reached
-  - do not re-run offboard engagement unless the helper returns an explicit error
-- diagnostic role:
-  - short local translation with minimal waypoint structure
+Representative successful `C2` episodes that were already stable in `official-sim-001`:
 
-### T3
+- [`C2/T2/episode-01/metrics.json`](../../artifacts/imece/official-sim-001/C2/T2/episode-01/metrics.json)
+  - `task_success = true`
+  - `horizontal_displacement_m = 0.9927`
+  - `max_altitude_m = 1.0136`
+  - `offboard_rejection_count = 0`
+  - `offboard_drop_count = 0`
+- [`C2/T3/episode-01/metrics.json`](../../artifacts/imece/official-sim-001/C2/T3/episode-01/metrics.json)
+  - `task_success = true`
+  - `square_pattern_complete = true`
+  - `horizontal_displacement_m = 0.0548`
+  - `offboard_rejection_count = 0`
+  - `offboard_drop_count = 0`
 
-- current canonical prompt:
-  - `Take off, fly a square with one-meter sides, return near the start, and land.`
-- current clarification reply if needed:
-  - “Use local ENU at about one meter altitude, fly a square with one-meter sides, return near the start pose, then land.”
-- current task-specific settings:
-  - derive the square from the first sampled local pose
-  - do not assume the start is exactly the world origin
-  - keep the square axis-aligned in local `ENU`
-  - use exactly five motion targets
-  - read verification from `last_msg.pose.position` or `summary.last_position`
-  - only advance after the current pose is near the active target
-  - use at most two verification windows per target
-  - refuse rather than skip ahead if the current target is still not reached after the second verification window
-  - after landing, emit exactly `DONE: square complete`
-- diagnostic role:
-  - repeated local-pose target sequencing without semantic mission support
+Representative remaining `C2` misses in `official-sim-001`:
 
-### T4
+- [`C2/T1/episode-04/metrics.json`](../../artifacts/imece/official-sim-001/C2/T1/episode-04/metrics.json)
+  - terminal `DONE`, but `max_altitude_m = 0.4477`
+  - safe landing happened, but the takeoff criterion itself was not met
+- [`C2/T1/episode-06/metrics.json`](../../artifacts/imece/official-sim-001/C2/T1/episode-06/metrics.json)
+  - terminal `DONE`, but `max_altitude_m = 0.0728`
+- [`C2/T1/episode-09/metrics.json`](../../artifacts/imece/official-sim-001/C2/T1/episode-09/metrics.json)
+  - terminal `DONE`, but `max_altitude_m = 0.3898` and `latest_armed = true`
+- [`C2/T4/episode-05/metrics.json`](../../artifacts/imece/official-sim-001/C2/T4/episode-05/metrics.json)
+  - terminal `DONE`, but `horizontal_displacement_m = 11.3679` under `Stop there.`
 
-- current canonical prompt:
-  - `Take off and move forward one meter.`
-- current clarification reply if needed:
-  - “Use local ENU with forward as +x and move one meter unless I interrupt with a correction.”
-- current task-specific settings:
-  - the first turn uses exactly two motion targets: takeoff hold and halfway-forward hold
-  - the first turn ends with `CLARIFY: awaiting correction`
-  - the second turn receives the deterministic correction prompt
-- deterministic correction rotation:
-  - odd episodes: `Stop there.`
-  - even episodes: `Land now.`
-- diagnostic role:
-  - mid-flight correction, interruption, and safe termination
+Interpretation from the initial official batch:
 
-## 8. Task Version History
+- `C1` remains low not because of the old schema-drift issue, but because prompt-only guidance still leaves the model exposed to recurrent offboard and timing brittleness on the generic surface.
+- In `official-sim-001`, `C1` has `0` historical interface mismatch episodes, yet `T2` and `T3` still finish `0/10`, with every episode carrying `F4`, every episode timing out, and every episode triggering the watchdog.
+- `C1/T2` and `C1/T3` therefore show that once the interface itself is stabilized, prompt-only knowledge still does not reliably maintain the transport mechanics needed for multi-step motion.
+- The remaining `C2` misses point to a different class of issue. They are not transport/watchdog failures, they do not request a new helper class, and they are captured by task-success criteria rather than by the current `F1-F5` taxonomy.
+- In `C2/T1`, the three failures all end with terminal `DONE` but never satisfy the altitude criterion, which suggests premature completion without a strong enough final altitude verification step.
+- In `C2/T4/episode-05`, the trace reads the current pose near `x ~= 12`, then uses relay targets at `(0, 0, 1)` and `(0.5, 0, 1)`, indicating a start-relative parameterization miss rather than a helper-layer failure.
 
-The paper should use the current task set, not every internal draft. Still, the history matters because it explains why the current set looks the way it does.
+Implementation implication from the initial official batch:
 
-### Early Draft That Was Retired
+- no new helper class is justified by the preserved failures
+- the highest-value next step is prompt or policy refinement inside `C2`, not helper expansion
+- the two concrete targets are:
+  - `T1`: require explicit altitude attainment verification before landing or `DONE`
+  - `T4`: require `Stop there.` handling to remain start-relative and forbid origin-based retargeting
 
-An earlier internal task draft used an ambiguity-oriented probe in place of the current square-pattern task. That draft was retired because the study goal narrowed to the minimum control layer required for novice-requested flight behavior, not ambiguity probing as a separate headline task.
+Targeted `C2` refinement and revised official comparison:
 
-That retired ambiguity task is not part of the preserved final task set and should not be presented as a current evaluation task.
+- To preserve baseline provenance, `official-sim-001` was left unchanged.
+- A revised batch, [`official-sim-002`](../../artifacts/imece/official-sim-002), was cloned from `official-sim-001`.
+- Only `C2:T1` and `C2:T4` were rerun in `official-sim-002`.
+- `C0` and `C1` remained byte-for-byte identical to `official-sim-001`.
+- `C2:T2` and `C2:T3` remained byte-for-byte identical to `official-sim-001`.
+- The only code change between the two official batches was a `C2`-only prompt refinement:
+  - `T1`: explicit takeoff-hold verification before landing or `DONE`
+  - `T4`: explicit start-relative `Stop there.` handling with no origin-based retargeting
 
-### Current Final Task Set
+Revised-analysis result from `official-sim-002`:
 
-The final preserved mapping is:
+| Condition | Overall success | `T1` | `T2` | `T3` | `T4` |
+| --- | --- | --- | --- | --- | --- |
+| `C0` | `6/40 = 15.0%` | `5/10` | `0/10` | `0/10` | `1/10` |
+| `C1` | `6/40 = 15.0%` | `6/10` | `0/10` | `0/10` | `0/10` |
+| `C2` | `40/40 = 100.0%` | `10/10` | `10/10` | `10/10` | `10/10` |
 
-- `T1`: Takeoff Hover Land
-- `T2`: Short Translation
-- `T3`: Square Pattern Flight
-- `T4`: Mid-flight Interrupt Handling
+Representative corrected `C2` episodes in `official-sim-002`:
 
-This mapping should be used consistently in the paper, captions, and tables.
+- [`C2/T1/episode-04/metrics.json`](../../artifacts/imece/official-sim-002/C2/T1/episode-04/metrics.json)
+  - `task_success = true`
+  - `max_altitude_m = 1.0035`
+  - `latest_armed = false`
+- [`C2/T1/episode-06/metrics.json`](../../artifacts/imece/official-sim-002/C2/T1/episode-06/metrics.json)
+  - `task_success = true`
+  - `max_altitude_m = 1.0010`
+  - `latest_armed = false`
+- [`C2/T1/episode-09/metrics.json`](../../artifacts/imece/official-sim-002/C2/T1/episode-09/metrics.json)
+  - `task_success = true`
+  - `max_altitude_m = 1.0079`
+  - `latest_armed = false`
+- [`C2/T4/episode-05/metrics.json`](../../artifacts/imece/official-sim-002/C2/T4/episode-05/metrics.json)
+  - `task_success = true`
+  - `horizontal_displacement_m = 0.4555` under `Stop there.`
+  - the revised trace holds and lands near the current local position instead of retargeting toward the world origin
 
-## 9. Experiment Settings That Were Held Fixed
+Promotion-gate result after the revised official batch:
 
-The following settings are fixed across the preserved simulation evidence:
+| Condition | `T1` gate | `T2` gate | `T4` gate | Critical safety failures | Promotion result |
+| --- | --- | --- | --- | --- | --- |
+| `C0` | `5/10` | `0/10` | `1/10` | `33` | fail |
+| `C1` | `6/10` | `0/10` | `0/10` | `32` | fail |
+| `C2` | `10/10` | `10/10` | `10/10` | `0` | pass |
 
-- platform:
-  - `Ubuntu 24.04`
-  - `ROS 2 Jazzy`
-  - `PX4`
-  - `Gazebo`
-  - `MAVROS`
-  - `ros-mcp-server`
-  - `Gemini CLI`
-- control boundary:
-  - local pose observation
-  - local pose setpoint publishing
-  - mode and arming control
-  - restricted topic/service surface only
-- session policy:
-  - fresh Gemini session per episode in official automated evaluation
-  - shared turn contract requiring `CLARIFY`, `REFUSE`, or `DONE`
-- logging:
-  - full first-turn prompt
-  - Gemini structured trace
-  - tool use trace
-  - monitor stream
-  - metrics and metadata
+Official-simulation conclusion after `official-sim-002`:
 
-## 10. Official Simulation vs Official Real
+- `C0` and `C1` still define the generic and prompt-only boundary, and both remain brittle on the final task set
+- `C2` remains the same frozen helper subset as before; no new helper class was introduced
+- the targeted `C2` prompt refinements close the remaining `T1` and `T4` gaps without changing `T2`, `T3`, or the helper inventory
+- the promoted condition is now `C2`
+- under the current specification, `official_real` may start with promoted `C2`
 
-### Current Automated Status
+### Phase D. Official Real Flight
 
-At the moment, the simulation runner automates:
+Current status:
 
-- `discovery`
-- `c2_freeze`
-- `official_sim`
+- not yet preserved
+- single-episode scaffold exists
+- the simulation promotion gate is now satisfied by `C2` in `official-sim-002`
 
-For real flight, the current code now provides a single-episode scaffold through `run-real-episode`. The batch-style `official_real` phase is still intentionally plan-only.
+What it should mean in the paper:
 
-### What `official_real` should mean in the paper
+- promoted condition only
+- indoor mocap environment
+- tasks `R1`, `R2`
+- operator remains responsible for go/no-go and takeover readiness
 
-`official_real` is not “always `C2`.” It is “the promoted condition only.” The promoted condition is chosen after the simulation gate defined in [`implementation.md`](./implementation.md).
+## 8. Analysis Method Used on Preserved Artifacts
 
-### Minimum Useful Automation for `official_real`
+### Source of Task Success
 
-A full unattended real-flight batch runner is not necessary for the current study. The current single-episode scaffold is useful because it:
+Do not use preserved `task_success` blindly when the current task specification changed.
 
-- build the correct first-turn prompt from the promoted condition and real-flight task
-- preserve the exact same logging layout used in simulation
-- preserve commit/model/environment metadata
-- keep the operator checklist and go/no-go decision outside the automation boundary
+Use:
 
-That is the right minimum if real-flight support is added next. The human should still own:
+- current scoring from [`ros_mcp/imece/scoring.py`](../../ros_mcp/imece/scoring.py)
+- `audit.json.current_task_success_by_condition_task`
+- `audit.json.stored_vs_current_task_success_mismatches`
 
-- vehicle power and arming readiness
-- mocap volume check
-- RC or QGroundControl takeover readiness
-- physical takeoff clearance
+Current known stored-vs-current drift:
 
-## 11. Real-flight Outputs That Need to Be Preserved
+- `C1:T4:04`
+- `C1:T4:05`
 
-The current specification already defines most of the needed outputs in [`implementation.md`](./implementation.md), especially the metrics and safety sections.
+These episodes were stored as success historically but are not success under the current `T4` rule.
 
-For real flight, the paper-facing outputs should include at least:
+### Source of Failure Taxonomy
 
-- primary outcomes:
-  - task success
-  - operator-intervention-free success
-  - completion time
-- safety outcomes:
-  - watchdog-triggered land
-  - operator takeover or abort
-  - timeout
-  - mode drop or rejection
-- motion outcomes:
-  - altitude reached
-  - hover duration achieved
-  - translation error for `R2`
-- metadata:
-  - repo commit
-  - routed model
-  - platform revisions
-  - actual geofence and ceiling values
-  - environment note for the real-flight volume
+Use:
 
-The current documents already define most of these pieces:
+- current classification from [`ros_mcp/imece/analysis.py`](../../ros_mcp/imece/analysis.py)
+- current failure counts from batch `analysis.json`
 
-- experiment specification and success criteria:
-  - [`implementation.md`](./implementation.md)
-- staged rationale:
-  - [`design-rationale.md`](./design-rationale.md)
-- operational execution steps:
-  - [`runbook.md`](./runbook.md)
+Important caveats:
 
-What is still missing in code is only a batch-level official real-flight phase manager. The single-episode scaffold already exists.
+- discovery contains historical interface mismatch tied to `wait_for_previous`
+- because of that contamination, the paper-safe claim about `C1` should stay qualitative rather than a clean numeric prompt-only improvement claim
+- in `official-sim-001`, the remaining `C2` misses are currently task-criterion misses with empty `failure_codes`, so they should not be mislabeled as transport/timing failures
+
+### Source of Helper Freeze Justification
+
+Use:
+
+- discovery `analysis.json.selection`
+- runtime mirror in [`config/imece/c2_freeze.json`](../../config/imece/c2_freeze.json)
+
+These two should stay synchronized.
+
+### Source of Reproducibility Metadata
+
+Use:
+
+- per-episode `metadata.json.runtime_metadata`
+- batch `audit.json.reproducibility_metadata`
+
+Important limitation:
+
+- preserved discovery predates top-level runtime metadata capture
+
+## 9. Paper-safe Claims
+
+Supported today:
+
+- generic-only operation is brittle for beginner PX4 local-pose control
+- prompt-only guidance improves reasoning but does not reliably remove transport/timing and safety failures
+- discovery justifies a frozen minimal `C2` subset of `setpoint_relay`, `mode_guard`, and `abort_watchdog`
+- targeted `C2:T3` validation closes the remaining preserved square-pattern gap
+- official simulation shows a large gap between `C2` and the `C0/C1` baselines on the final fixed task set
+
+Not yet supported today:
+
+- promotion of any condition to `official_real` under the current gate
+- real-flight transfer result claims
+- repeated frame/sign errors as a preserved freeze driver
+- a claim that `C2` is already fully validated across `T1-T4` under the promotion criterion
+
+## 10. What to Update When New Batches Arrive
+
+When a new preserved batch is added:
+
+1. record the exact batch ID and phase meaning here
+2. state what was held fixed and what changed
+3. summarize results from `batch_state.json`, `analysis.json`, and `audit.json`
+4. separate preserved evidence from planned next steps
+5. state explicitly which claims become newly supported and which still remain unsupported
