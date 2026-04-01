@@ -53,10 +53,20 @@ def test_shared_terminal_contract_is_present():
     assert "Never end with `DONE.`" in prompt
 
 
+def test_t1_prompt_includes_takeoff_verification_protocol():
+    prompt = build_episode_prompt("C2", "T1", 1, "127.0.0.1", 9090, selected_helpers=["setpoint_relay"])
+    assert "C2 takeoff verification refinement:" in prompt
+    assert "Treat the takeoff hold as reached only when altitude is at least `0.8 m`" in prompt
+    assert "Do not land or emit `DONE` before the altitude criterion is satisfied" in prompt
+
+
 def test_t4_prompt_includes_staged_followup_protocol():
     prompt = build_episode_prompt("C2", "T4", 1, "127.0.0.1", 9090, selected_helpers=["setpoint_relay"])
+    assert "Read the current local pose exactly once before the first motion target" in prompt
     assert "Use exactly two motion targets in the first turn" in prompt
+    assert "Keep all T4 motion targets start-relative" in prompt
     assert "Do not retarget for the halfway-forward motion until the current pose is near the takeoff hold" in prompt
+    assert "do not send a new origin-based target" in prompt
     assert "CLARIFY: awaiting correction" in prompt
     assert "Come back." not in prompt
 

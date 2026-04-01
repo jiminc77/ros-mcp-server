@@ -218,6 +218,47 @@ def test_merge_env_file_loads_missing_keys_from_repo_env(tmp_path):
     assert env["EXISTING"] == "from_env"
 
 
+def test_start_rosbag_discards_shell_logs(tmp_path, monkeypatch):
+    captured = {}
+
+    class DummyProcess:
+        def poll(self) -> int:
+            return 0
+
+    monkeypatch.setattr(runner.shutil, "which", lambda name: "/usr/bin/ros2")
+
+    def fake_popen(args, stdout=None, stderr=None, text=None):
+        captured["args"] = args
+        captured["stdout"] = stdout
+        captured["stderr"] = stderr
+        captured["text"] = text
+        return DummyProcess()
+
+    monkeypatch.setattr(runner.subprocess, "Popen", fake_popen)
+
+    process = runner._start_rosbag(tmp_path / "rosbag")
+
+    assert process is not None
+    assert captured["stdout"] == runner.subprocess.DEVNULL
+    assert captured["stderr"] == runner.subprocess.DEVNULL
+    assert captured["text"] is True
+
+
+def test_cleanup_episode_artifacts_removes_transient_logs(tmp_path):
+    episode_dir = tmp_path / "episode-01"
+    rosbag_dir = episode_dir / "rosbag"
+    rosbag_dir.mkdir(parents=True)
+    (episode_dir / "watchdog.heartbeat").write_text("alive", encoding="utf-8")
+    (rosbag_dir / "rosbag.stdout.log").write_text("stdout", encoding="utf-8")
+    (rosbag_dir / "rosbag.stderr.log").write_text("stderr", encoding="utf-8")
+
+    runner._cleanup_episode_artifacts(episode_dir)
+
+    assert not (episode_dir / "watchdog.heartbeat").exists()
+    assert not (rosbag_dir / "rosbag.stdout.log").exists()
+    assert not (rosbag_dir / "rosbag.stderr.log").exists()
+
+
 def test_normalize_episode_start_state_forces_landed_disarmed_baseline(monkeypatch):
     class FakeRequester:
         def __init__(self) -> None:

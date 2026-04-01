@@ -403,14 +403,10 @@ def _start_rosbag(output_dir: Path) -> subprocess.Popen[str] | None:
     if shutil.which("ros2") is None:
         return None
     output_dir.mkdir(parents=True, exist_ok=True)
-    stdout_path = output_dir / "rosbag.stdout.log"
-    stderr_path = output_dir / "rosbag.stderr.log"
-    stdout_handle = stdout_path.open("w", encoding="utf-8")
-    stderr_handle = stderr_path.open("w", encoding="utf-8")
     return subprocess.Popen(
         ["ros2", "bag", "record", "-o", str(output_dir / "bag"), *ROSBAG_TOPICS],
-        stdout=stdout_handle,
-        stderr=stderr_handle,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
         text=True,
     )
 
@@ -434,6 +430,16 @@ def _touch_heartbeat(path: Path) -> None:
 
 def _mark_abort(path: Path) -> None:
     path.write_text("abort", encoding="utf-8")
+
+
+def _cleanup_episode_artifacts(episode_dir: Path) -> None:
+    transient_paths = (
+        episode_dir / "watchdog.heartbeat",
+        episode_dir / "rosbag" / "rosbag.stdout.log",
+        episode_dir / "rosbag" / "rosbag.stderr.log",
+    )
+    for path in transient_paths:
+        path.unlink(missing_ok=True)
 
 
 def _estimate_offboard_rejections(
@@ -1014,6 +1020,7 @@ def _run_configured_episode(args: argparse.Namespace, *, execution_mode: str) ->
         _stop_process(rosbag_process)
         monitor.stop()
         ros_requester.close()
+        _cleanup_episode_artifacts(episode_dir)
     return episode_dir
 
 

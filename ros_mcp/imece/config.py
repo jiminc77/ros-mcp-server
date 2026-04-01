@@ -193,6 +193,32 @@ def _task_specific_block(task_id: str) -> str:
     ).strip()
 
 
+def _c2_task_refinement_block(task_id: str) -> str:
+    if task_id in {"T1", "R1"}:
+        return textwrap.dedent(
+            """
+            C2 takeoff verification refinement:
+            - Read the current local pose once and treat it as the start `(x0, y0)`.
+            - Use one takeoff hold target near `(x0, y0, 1.0)` and keep that target active until the vehicle is near it.
+            - Verify the takeoff hold with `subscribe_for_duration` on `/mavros/local_position/pose`; use one window of about `3.0` seconds and at most one second window only if the first window does not yet show success.
+            - Treat the takeoff hold as reached only when altitude is at least `0.8 m` and local `x/y` stays within about `0.25 m` of the start.
+            - After the takeoff hold is reached, keep the same target active for about five seconds of hover before landing.
+            - Do not land or emit `DONE` before the altitude criterion is satisfied.
+            - Finish with `DONE: ...` only after the platform is back near the ground.
+            """
+        ).strip()
+    if task_id == "T4":
+        return textwrap.dedent(
+            """
+            C2 stop-there refinement:
+            - Read the current local pose exactly once before the first motion target and treat it as the start `(x0, y0)`.
+            - Keep all T4 motion targets start-relative; do not replace them with world-origin targets.
+            - If the correction is `Stop there.`, do not send a new origin-based target. Hold the current local `x/y` position briefly, or reuse the already reached halfway-forward hold if it is still current, then land from that same `x/y` position.
+            """
+        ).strip()
+    return ""
+
+
 def build_episode_prompt(
     condition: str,
     task_id: str,
@@ -212,6 +238,7 @@ def build_episode_prompt(
     ]
     if normalized_condition == "C2":
         parts.append(_helper_block(selected_helpers or []))
+        parts.append(_c2_task_refinement_block(task_spec.task_id))
     parts.append(_task_specific_block(task_spec.task_id))
 
     parts.append(
