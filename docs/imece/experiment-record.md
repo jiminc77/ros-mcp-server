@@ -21,6 +21,7 @@ The following preserved batches are the current paper-facing evidence:
 | `discovery-20260331` | discovery pilot | determine whether `C2` is needed and which helpers can be frozen | `artifacts/imece/discovery-20260331/` |
 | `c2-freeze-t3-20260331` | targeted `C2` validation | validate the remaining `T3` square-pattern gap under the frozen `C2` subset | `artifacts/imece/c2-freeze-t3-20260331/` |
 | `official-sim-001` | official simulation evaluation | compare `C0`, `C1`, and `C2` head-to-head on the final `T1-T4` task set | `artifacts/imece/official-sim-001/` |
+| `educational-sim-001` | educational prompt-profile evaluation | test whether the frozen `C2` interface remains robust across `T1-T3` when the same tasks are written at clearly different student reading levels | `artifacts/imece/educational-sim-001/` |
 
 These are the only preserved batches that should be cited as direct evidence in the paper right now.
 
@@ -44,6 +45,7 @@ Important differences across preserved batches:
 - preserved discovery predates top-level runtime metadata capture
 - preserved `c2-freeze-t3-20260331` has complete per-episode `runtime_metadata`
 - preserved `official-sim-001` has complete per-episode `runtime_metadata` and no historical interface mismatch contamination
+- preserved `educational-sim-001` has complete per-episode `runtime_metadata`, no historical interface mismatch contamination, and one recovered invalid tool call inside an otherwise successful episode
 
 ## 3. Current Study Snapshot
 
@@ -65,7 +67,7 @@ Important differences across preserved batches:
   - `T1-T4`
   - `5` repetitions per task
   - total `20` episodes
-- planned educational simulation extension:
+- preserved educational simulation batch:
   - `C2` only
   - `T1-T3`
   - prompt levels: `elementary`, `middle`, `high`, `college`
@@ -459,24 +461,70 @@ What it should mean in the paper:
 
 ### Phase E. Educational Prompt Sweep
 
-Current status:
+Artifact root: [`artifacts/imece/educational-sim-001/`](../../artifacts/imece/educational-sim-001/)
 
-- not yet preserved
-- runner support now exists through `run-educational-batch`
-- intended matrix: `C2 x T1-T3 x 4 prompt levels x 3 sibling prompts x 1 = 36` episodes
-- current sibling prompt IDs are `a`, `b`, and `c`
-- `T4` is intentionally excluded because the fixed second-turn correction dominates the interaction
-
-What stays fixed when this batch is run:
+What was held fixed:
 
 - the frozen `C2` helper subset
 - the current task-specific clarification replies outside the educational prompt text itself
+- task semantics across all prompt profiles
+- educational scope limited to `T1`, `T2`, and `T3`
+- `T4` intentionally excluded because the fixed second-turn correction dominates the interaction
 
-How it should be interpreted later:
+Matrix:
+
+- `C2 x T1-T3 x 4 prompt levels x 3 sibling prompts x 1 = 36` episodes
+- prompt levels:
+  - `elementary`
+  - `middle`
+  - `high`
+  - `college`
+- sibling prompt IDs:
+  - `a`
+  - `b`
+  - `c`
+
+Result summary:
+
+| Slice | Success |
+| --- | --- |
+| overall | `36 / 36 = 100.0%` |
+| `T1` | `12 / 12 = 100.0%` |
+| `T2` | `12 / 12 = 100.0%` |
+| `T3` | `12 / 12 = 100.0%` |
+| `elementary` | `9 / 9 = 100.0%` |
+| `middle` | `9 / 9 = 100.0%` |
+| `high` | `9 / 9 = 100.0%` |
+| `college` | `9 / 9 = 100.0%` |
+| sibling `a` | `12 / 12 = 100.0%` |
+| sibling `b` | `12 / 12 = 100.0%` |
+| sibling `c` | `12 / 12 = 100.0%` |
+
+Audit summary:
+
+- historical interface mismatch: `0`
+- explicit frame/sign error traces: `0`
+- stored-vs-current task-success mismatches: `0`
+- runtime metadata coverage: `36 / 36` episodes complete for all required fields
+
+Important caveat:
+
+- one episode, [`C2/T1/high/c/episode-01`](../../artifacts/imece/educational-sim-001/C2/T1/high/c/episode-01/), contains one invalid `setpoint_relay` call with `params/target must be object`
+- the model corrected the call in the same turn, the episode still succeeded, and `analysis.json.freeze_review.helper_change_request` remains empty
+- because of that, this batch supports a robustness claim, not a zero-error claim
+
+What this batch supports:
 
 - as a separate `C2`-only language-variation study
 - not as a replacement for the `C0/C1/C2` boundary comparison
-- not as preserved evidence until an actual batch directory is retained and analyzed
+- under the frozen `C2` boundary, the interface remained robust across all preserved `T1-T3` educational prompt profiles in simulation
+- this preserved batch does not show a level-dependent success drop across `elementary`, `middle`, `high`, and `college`
+
+What this batch does not support by itself:
+
+- a claim that there is a measurable performance ranking among the four reading levels
+- a claim that educational prompt variation is zero-error under all circumstances
+- any real-flight educational transfer claim
 
 ## 8. Analysis Method Used on Preserved Artifacts
 
@@ -540,12 +588,14 @@ Supported today:
 - targeted `C2:T3` validation closes the remaining preserved square-pattern gap
 - official simulation shows a large gap between `C2` and the `C0/C1` baselines on the final fixed task set
 - `official-sim-001` identifies `C2` as the strongest preserved condition to carry forward into the planned real-flight phase
+- `educational-sim-001` shows that the frozen `C2` interface remains successful on preserved `T1-T3` educational prompt variants across all four reading levels in simulation
 
 Not yet supported today:
 
 - real-flight transfer result claims
 - repeated frame/sign errors as a preserved freeze driver
 - a claim that `C2` is already fully validated across `T1-T4` in preserved official evidence
+- a claim that the four reading levels produce a meaningful performance gradient under the current `C2` setup
 
 ## 10. What to Update When New Batches Arrive
 
