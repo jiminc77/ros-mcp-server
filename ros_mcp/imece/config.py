@@ -64,6 +64,80 @@ TASK_SPECS = {
 }
 
 T4_INTERRUPT_PROMPTS = ("Stop there.", "Land now.")
+PROMPT_LEVELS = ("elementary", "middle", "high", "college")
+PROMPT_VARIANTS = ("a", "b", "c")
+EDUCATIONAL_PROMPT_TASKS = ("T1", "T2", "T3")
+
+EDUCATIONAL_PROMPT_BANK = {
+    "elementary": {
+        "a": {
+            "T1": "Make the drone go up. Stop when it is about one meter high. Wait there for five seconds. Then bring it down and land.",
+            "T2": "Make the drone go up. Stop when it is about one meter high. Move it forward one meter. Wait there for five seconds. Then bring it down and land.",
+            "T3": "Make the drone go up. Stop when it is about one meter high. Fly a square with one-meter sides. Come back near where it started. Then bring it down and land.",
+        },
+        "b": {
+            "T1": "Lift the drone to about one meter. Keep it still for five seconds. After that, land it.",
+            "T2": "Lift the drone to about one meter. Move it forward one meter. Keep it still for five seconds. After that, land it.",
+            "T3": "Lift the drone to about one meter. Fly a one-meter square. Return near the start. After that, land it.",
+        },
+        "c": {
+            "T1": "Go up to about one meter. Stay there for five seconds. Come down and land.",
+            "T2": "Go up to about one meter. Go forward one meter. Stay there for five seconds. Come down and land.",
+            "T3": "Go up to about one meter. Fly a one-meter square. Come back near the start. Come down and land.",
+        },
+    },
+    "middle": {
+        "a": {
+            "T1": "Take off to about one meter. Hover there for five seconds. Then land.",
+            "T2": "Take off to about one meter. Move forward one meter. Hover there for five seconds. Then land.",
+            "T3": "Take off to about one meter. Fly a one-meter square. Return near the start. Then land.",
+        },
+        "b": {
+            "T1": "Take off to about one meter, hover for five seconds, and then land.",
+            "T2": "Take off to about one meter, move forward one meter, hover for five seconds, and then land.",
+            "T3": "Take off to about one meter, fly a one-meter square, return near the start, and then land.",
+        },
+        "c": {
+            "T1": "Take off, reach about one meter, hover for five seconds, then land.",
+            "T2": "Take off, reach about one meter, move forward one meter, hover for five seconds, then land.",
+            "T3": "Take off, reach about one meter, fly a one-meter square, return near the start, then land.",
+        },
+    },
+    "high": {
+        "a": {
+            "T1": "Ascend to roughly one meter, hold position for five seconds, and then land.",
+            "T2": "Ascend to roughly one meter, move forward by one meter, hold position for five seconds, and then land.",
+            "T3": "Ascend to roughly one meter, complete a one-meter square, return near the starting point, and then land.",
+        },
+        "b": {
+            "T1": "Ascend to roughly one meter altitude, maintain position for five seconds, and land.",
+            "T2": "Ascend to roughly one meter altitude, advance by one meter, maintain position for five seconds, and land.",
+            "T3": "Ascend to roughly one meter altitude, complete a one-meter square, return near the starting point, and land.",
+        },
+        "c": {
+            "T1": "Reach roughly one meter altitude, maintain a five-second hover, then land.",
+            "T2": "Reach roughly one meter altitude, translate forward by one meter, maintain a five-second hover, then land.",
+            "T3": "Reach roughly one meter altitude, complete a one-meter square path, return near the starting point, then land.",
+        },
+    },
+    "college": {
+        "a": {
+            "T1": "Establish a hover at approximately one meter altitude for five seconds, then execute landing.",
+            "T2": "Establish approximately one meter altitude, execute a one-meter forward translation, maintain a five-second hover interval, then land.",
+            "T3": "Establish approximately one meter altitude, execute a one-meter square trajectory, return to the vicinity of the start point, then land.",
+        },
+        "b": {
+            "T1": "Achieve approximately one meter altitude, sustain a five-second hover interval, and conclude with landing.",
+            "T2": "Achieve approximately one meter altitude, perform a one-meter forward displacement, sustain a five-second hover interval, and conclude with landing.",
+            "T3": "Achieve approximately one meter altitude, complete a one-meter square trajectory, recover to the vicinity of the starting point, and conclude with landing.",
+        },
+        "c": {
+            "T1": "Perform takeoff to approximately one meter, maintain a five-second hover, and execute landing.",
+            "T2": "Perform takeoff to approximately one meter, execute a one-meter forward translation, maintain a five-second hover, and execute landing.",
+            "T3": "Perform takeoff to approximately one meter, traverse a one-meter square trajectory, recover near the starting location, and execute landing.",
+        },
+    },
+}
 
 
 def _read_condition_artifact(name: str) -> str:
@@ -82,6 +156,47 @@ def resolve_t4_interrupt(episode_index: int) -> str:
     if episode_index < 1:
         raise ValueError("T4 episode_index must be positive")
     return T4_INTERRUPT_PROMPTS[(episode_index - 1) % len(T4_INTERRUPT_PROMPTS)]
+
+
+def resolve_prompt_profile(
+    prompt_level: str | None = None,
+    prompt_variant: str | None = None,
+) -> tuple[str | None, str | None]:
+    if prompt_level is None and prompt_variant is None:
+        return None, None
+    if prompt_level is None or prompt_variant is None:
+        raise ValueError("prompt_level and prompt_variant must be provided together")
+    normalized_level = prompt_level.lower()
+    normalized_variant = prompt_variant.lower()
+    if normalized_level not in PROMPT_LEVELS:
+        raise ValueError(f"Unsupported IMECE prompt level: {prompt_level}")
+    if normalized_variant not in PROMPT_VARIANTS:
+        raise ValueError(f"Unsupported IMECE prompt variant: {prompt_variant}")
+    return normalized_level, normalized_variant
+
+
+def resolve_task_prompt(
+    task_id: str,
+    prompt_level: str | None = None,
+    prompt_variant: str | None = None,
+) -> str:
+    task_spec = resolve_task_spec(task_id)
+    normalized_level, normalized_variant = resolve_prompt_profile(prompt_level, prompt_variant)
+    if normalized_level is None:
+        return task_spec.canonical_prompt
+    prompt_task_id = {"R1": "T1", "R2": "T2"}.get(task_spec.task_id, task_spec.task_id)
+    if prompt_task_id not in EDUCATIONAL_PROMPT_TASKS:
+        supported = ", ".join(EDUCATIONAL_PROMPT_TASKS)
+        raise ValueError(
+            f"Educational prompt profiles are defined only for {supported}; got {task_spec.task_id}"
+        )
+    try:
+        return EDUCATIONAL_PROMPT_BANK[normalized_level][normalized_variant][prompt_task_id]
+    except KeyError as exc:
+        raise ValueError(
+            f"Educational prompt profile not defined for task={task_spec.task_id}, "
+            f"level={normalized_level}, variant={normalized_variant}"
+        ) from exc
 
 
 def load_c2_freeze(path: Path | None = None) -> dict:
@@ -226,12 +341,20 @@ def build_episode_prompt(
     rosbridge_ip: str,
     rosbridge_port: int,
     selected_helpers: list[str] | None = None,
+    prompt_level: str | None = None,
+    prompt_variant: str | None = None,
 ) -> str:
     normalized_condition = condition.upper()
     if normalized_condition not in {"C0", "C1", "C2"}:
         raise ValueError(f"Unsupported IMECE condition: {condition}")
 
     task_spec = resolve_task_spec(task_id)
+    normalized_level, normalized_variant = resolve_prompt_profile(prompt_level, prompt_variant)
+    task_prompt = resolve_task_prompt(
+        task_spec.task_id,
+        prompt_level=normalized_level,
+        prompt_variant=normalized_variant,
+    )
     parts = [
         _shared_contract(rosbridge_ip, rosbridge_port),
         _read_condition_artifact(normalized_condition),
@@ -249,9 +372,11 @@ def build_episode_prompt(
             - task: `{task_spec.task_id}`
             - task_name: `{task_spec.title}`
             - episode_index: `{episode_index}`
+            - prompt_level: `{normalized_level or 'canonical'}`
+            - prompt_variant: `{normalized_variant or 'canonical'}`
 
             Task prompt:
-            {task_spec.canonical_prompt}
+            {task_prompt}
             """
         ).strip()
     )

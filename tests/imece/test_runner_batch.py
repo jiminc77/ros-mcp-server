@@ -28,6 +28,10 @@ def _shared_args(tmp_path: Path) -> Namespace:
         max_attempts=2,
         retry_at_end=True,
         phase=None,
+        prompt_level=None,
+        prompt_variant=None,
+        prompt_levels=None,
+        prompt_variants=None,
     )
 
 
@@ -39,6 +43,36 @@ def test_study_plan_summary_matches_spec_counts():
     assert summary["phases"]["official_real"]["episode_count"] == 20
     assert summary["simulation_total_before_real"] == 180
     assert summary["fixed_total_with_one_c2_freeze_batch"] == 200
+
+
+def test_build_episode_matrix_expands_prompt_profiles():
+    matrix = runner.build_episode_matrix(
+        ["C2"],
+        ["T1", "T2"],
+        1,
+        prompt_levels=["elementary", "college"],
+        prompt_variants=["a", "c"],
+    )
+
+    keys = [entry.key for entry in matrix]
+    assert len(matrix) == 8
+    assert "C2:T1:elementary:a:01" in keys
+    assert "C2:T2:college:c:01" in keys
+
+
+def test_build_episode_matrix_rejects_t4_prompt_profiles():
+    try:
+        runner.build_episode_matrix(
+            ["C2"],
+            ["T4"],
+            1,
+            prompt_levels=["elementary"],
+            prompt_variants=["a"],
+        )
+    except ValueError as exc:
+        assert "defined only for T1, T2, T3" in str(exc)
+    else:
+        raise AssertionError("expected unsupported educational task validation")
 
 
 def test_run_batch_retries_infra_errors_at_end(tmp_path, monkeypatch):
@@ -442,3 +476,101 @@ def test_square_pattern_metrics_fails_without_return_to_start(tmp_path):
 
     assert metrics["square_waypoints_reached"] == 4
     assert metrics["square_pattern_complete"] is False
+
+
+def test_parser_accepts_run_real_episode_with_prompt_profile():
+    parser = runner.build_parser()
+    args = parser.parse_args(
+        [
+            "run-real-episode",
+            "--condition",
+            "C2",
+            "--task",
+            "T1",
+            "--episode-index",
+            "1",
+            "--prompt-level",
+            "high",
+            "--prompt-variant",
+            "c",
+        ]
+    )
+    assert args.command == "run-real-episode"
+    assert args.prompt_level == "high"
+    assert args.prompt_variant == "c"
+
+
+def test_run_educational_batch_sets_c2_prompt_matrix(monkeypatch):
+    captured = {}
+
+    def fake_run_batch(args):
+        captured.update(vars(args))
+        return Path("/tmp/educational")
+
+    monkeypatch.setattr(runner, "run_batch", fake_run_batch)
+
+    parser = runner.build_parser()
+    args = parser.parse_args(["run-educational-batch", "--batch-id", "edu-001"])
+    runner.run_educational_batch(args)
+
+    assert captured["conditions"] == ["C2"]
+    assert captured["tasks"] == ["T1", "T2", "T3"]
+    assert captured["repetitions"] == 1
+    assert captured["prompt_levels"] == ["elementary", "middle", "high", "college"]
+    assert captured["prompt_variants"] == ["a", "b", "c"]
+    assert captured["phase"] == "educational_sim"
+
+
+def test_run_batch_uses_profiled_episode_directory(tmp_path, monkeypatch):
+    def fake_run_episode(args: Namespace) -> Path:
+        spec = runner.EpisodeMatrixEntry(
+            condition=args.condition,
+            task_id=args.task,
+            episode_index=args.episode_index,
+            prompt_level=args.prompt_level,
+            prompt_variant=args.prompt_variant,
+        )
+        episode_dir = runner._episode_dir_for(Path(args.output_root) / args.batch_id, spec)
+        if args.clean_existing and episode_dir.exists():
+            shutil.rmtree(episode_dir)
+        episode_dir.mkdir(parents=True, exist_ok=True)
+        metrics = {
+            "condition": args.condition,
+            "task_id": args.task,
+            "episode_index": args.episode_index,
+            "prompt_level": args.prompt_level,
+            "prompt_variant": args.prompt_variant,
+            "infra_error": False,
+            "infra_error_reasons": [],
+            "task_success": True,
+            "failure_codes": [],
+        }
+        (episode_dir / "metrics.json").write_text(json.dumps(metrics), encoding="utf-8")
+        (episode_dir / "metadata.json").write_text(
+            json.dumps({"turns": [], "selected_helpers": [], "prompt_level": args.prompt_level, "prompt_variant": args.prompt_variant}),
+            encoding="utf-8",
+        )
+        return episode_dir
+
+    monkeypatch.setattr(runner, "run_episode", fake_run_episode)
+    monkeypatch.setattr(
+        runner,
+        "analyze_batch",
+        lambda batch_dir: {
+            "reports": [],
+            "selection": {"selected_helpers": [], "status": "pending"},
+            "audit": {"notes": []},
+        },
+    )
+
+    args = _shared_args(tmp_path)
+    args.conditions = ["C2"]
+    args.tasks = ["T1"]
+    args.prompt_levels = ["elementary"]
+    args.prompt_variants = ["a"]
+    runner.run_batch(args)
+
+    profiled_dir = tmp_path / "batch-001" / "C2" / "T1" / "elementary" / "a" / "episode-01"
+    assert profiled_dir.exists()
+    state = json.loads((tmp_path / "batch-001" / "batch_state.json").read_text(encoding="utf-8"))
+    assert "C2:T1:elementary:a:01" in state["episodes"]

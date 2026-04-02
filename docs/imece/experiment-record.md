@@ -65,6 +65,12 @@ Important differences across preserved batches:
   - `T1-T4`
   - `5` repetitions per task
   - total `20` episodes
+- planned educational simulation extension:
+  - `C2` only
+  - `T1-T3`
+  - prompt levels: `elementary`, `middle`, `high`, `college`
+  - sibling prompts: `a`, `b`, `c`
+  - total `36` episodes
 
 ### Historical Note
 
@@ -169,6 +175,7 @@ The first-turn prompt is assembled by [`ros_mcp/imece/config.py`](../../ros_mcp/
 6. canonical task prompt
 
 This matters experimentally because each episode preserves the exact delivered text in `prompt.txt`.
+For educational prompt batches, the runner keeps the same shared contract and task-specific blocks but swaps the first-turn task prompt according to `prompt_level` and `prompt_variant`. In the current design, `prompt_level` is the actual educational contrast and `prompt_variant` is only a within-level sibling prompt ID (`a`, `b`, `c`).
 
 ### Shared Contract Held Constant
 
@@ -449,6 +456,27 @@ What it should mean in the paper:
 - tasks `T1`, `T2`, `T3`, `T4`
 - `5` repetitions per task
 - operator remains responsible for go/no-go and takeover readiness
+
+### Phase E. Educational Prompt Sweep
+
+Current status:
+
+- not yet preserved
+- runner support now exists through `run-educational-batch`
+- intended matrix: `C2 x T1-T3 x 4 prompt levels x 3 sibling prompts x 1 = 36` episodes
+- current sibling prompt IDs are `a`, `b`, and `c`
+- `T4` is intentionally excluded because the fixed second-turn correction dominates the interaction
+
+What stays fixed when this batch is run:
+
+- the frozen `C2` helper subset
+- the current task-specific clarification replies outside the educational prompt text itself
+
+How it should be interpreted later:
+
+- as a separate `C2`-only language-variation study
+- not as a replacement for the `C0/C1/C2` boundary comparison
+- not as preserved evidence until an actual batch directory is retained and analyzed
 
 ## 8. Analysis Method Used on Preserved Artifacts
 

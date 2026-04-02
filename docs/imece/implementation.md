@@ -307,8 +307,138 @@ The real-flight phase reuses the same task IDs as simulation:
 - real flight currently has a single-episode scaffold through `run-real-episode`
 - the current preserved evidence is sufficient to start `official_sim`
 - the current author-directed next phase is `official_real` with `C2 x T1-T4 x 5`
+- a separate `run-educational-batch` path now automates a `C2`-only simulation sweep over `4` prompt levels x `3` sibling prompts x `T1-T3 = 36` episodes
 
-## 12. Repository Map
+## 12. Educational Prompt Extension
+
+This extension is separate from the `C0 -> C1 -> C2` boundary study.
+It does not redefine the helper comparison.
+It asks a narrower follow-on question:
+
+- after the control boundary is fixed at `C2`, how robust is the interface to user prompts written at clearly different student reading levels?
+
+### Why the Extension Is `C2`-only
+
+- the boundary study already establishes that `C0` and `C1` are too brittle for reliable beginner flight
+- the educational question is about user-facing language variation, not about re-running the helper-necessity argument
+- keeping `C2` fixed isolates prompt wording as the intended experimental change
+
+### Why `T4` Is Excluded
+
+The educational sweep currently covers only `T1-T3`.
+`T4` is intentionally left out.
+The reason is methodological rather than operational:
+
+- `T4` is dominated by the fixed second-turn correction prompt
+- the educational study is supposed to test first-turn instruction comprehension
+- varying only the first prompt for `T4` would add cost but blur interpretation
+
+`T4` therefore remains part of the boundary and safety study, not the educational prompt-profile sweep.
+
+### Reader and Task Grounding
+
+The prompt profiles are treated as controlled readability variants, not as informal "student-like" rewrites.
+The intended grounding follows four recurring dimensions from readability and simplification work:
+
+- lexical familiarity
+  - how common and concrete the words are
+- syntactic load
+  - how much clause packing appears in one request
+- discourse explicitness
+  - how much local sequencing support the text gives the reader
+- abstraction and compression
+  - whether the request is phrased as concrete actions or as a denser task objective
+
+The working references for this extension are:
+
+- Common Core Appendix A
+  - text complexity should be evaluated through quantitative signals, qualitative dimensions, and reader/task considerations together
+- simplification literature
+  - simplification is not only lexical; it also changes syntax and discourse support
+- educational GenAI evaluation
+  - level targeting and meaning preservation should be checked together
+- plain-language guidance
+  - short sentences, common words, explicit organization, and one idea per sentence are recommended supports for less experienced readers
+
+Reference links:
+
+- [CCSS Appendix A Supplemental Information](https://www.thecorestandards.org/wp-content/uploads/Appendix-A-New-Research-on-Text-Complexity-revised.pdf)
+- [Text Simplification to Specific Readability Levels](https://www.mdpi.com/2227-7390/11/9/2063)
+- [Evaluating GenAI for Simplifying Texts for Education](https://arxiv.org/abs/2501.09158)
+- [US EPA Readability Guidance](https://www.epa.gov/choose-fish-and-shellfish-wisely/readability-developing-and-pretesting-concepts-messages-materials)
+- [NIH Plain Language: Getting Started or Brushing Up](https://www.nih.gov/sites/default/files/2025-02/nih-plain-language-getting-started-brushing-up.pdf)
+- [National Archives Plain Language Principles](https://www.archives.gov/open/plain-writing/10-principles.html)
+
+### Prompt-design Decision
+
+Earlier drafts experimented with a separate global variant axis, but that structure still made the study hard to read because the level difference was not visually dominant enough.
+The current design therefore makes the level axis do the real experimental work.
+
+What changes now:
+
+- `elementary / middle / high / college` is the primary contrast
+- `prompt_variant` is no longer a second difficulty axis
+- `prompt_variant = a / b / c` now means only three sibling phrasings within the same level
+
+This keeps the educational claim simple:
+
+- level is what should drive the main contrast
+- `a / b / c` only checks that the result is not an artifact of one exact wording string
+
+### Level Rubric
+
+| Level | Visible signature | Lexical style | Sentence style | Expected reader support |
+| --- | --- | --- | --- | --- |
+| `elementary` | obviously stepwise and concrete | `go up`, `bring it down`, `keep it still` | mostly 3-4 short sentences, one action per sentence | highest support |
+| `middle` | school-style procedural command | `take off`, `hover`, `return` | 2-3 short sentences or a short clause chain | high support |
+| `high` | more academic and compressed | `ascend`, `maintain`, `complete` | usually one dense sentence | moderate support |
+| `college` | most compressed adult phrasing | `establish`, `execute`, `trajectory`, `interval` | densest phrasing, more nominalized wording | lowest support |
+
+### Representative `T1` Ladder
+
+| Level | Representative prompt |
+| --- | --- |
+| `elementary` | `Make the drone go up. Stop when it is about one meter high. Wait there for five seconds. Then bring it down and land.` |
+| `middle` | `Take off to about one meter. Hover there for five seconds. Then land.` |
+| `high` | `Ascend to roughly one meter, hold position for five seconds, and then land.` |
+| `college` | `Establish a hover at approximately one meter altitude for five seconds, then execute landing.` |
+
+### Sibling Prompt Rule
+
+Each level has three sibling prompts identified as `a`, `b`, and `c`.
+These are not supposed to create a second readability ladder.
+They only provide small within-level paraphrases so the educational result is not tied to one exact sentence string.
+
+### Fixed Prompt-profile Rules
+
+- vary only the first-turn user prompt
+- keep task semantics identical across all profiles
+- keep the educational sweep on `T1`, `T2`, and `T3` only
+- do not add hidden hints such as `OFFBOARD`, `setpoint`, `ENU`, `PX4`, or `MAVROS`
+- do not add extra task decomposition beyond what is already visible in the user request
+- keep the task-specific clarification replies fixed under the current runner
+
+### Current Prompt-profile Matrix
+
+| Factor | Values |
+| --- | --- |
+| condition | `C2` only |
+| tasks | `T1`, `T2`, `T3` |
+| prompt levels | `elementary`, `middle`, `high`, `college` |
+| sibling prompts | `a`, `b`, `c` |
+| repetitions | `1` |
+| total | `36` |
+
+The current runner implementation preserves prompt-profile metadata in both `metrics.json` and `metadata.json` as:
+
+- `prompt_level`
+- `prompt_variant`
+
+Profiled simulation batches also write episode directories under:
+
+- `artifacts/imece/<batch_id>/<condition>/<task>/<prompt_level>/<prompt_variant>/episode-01/`
+
+## 13. Repository Map
 
 ### Documentation
 
@@ -338,13 +468,13 @@ The real-flight phase reuses the same task IDs as simulation:
 | [`ros_mcp/imece/constants.py`](../../ros_mcp/imece/constants.py) | allowed topics, services, helper names, defaults |
 | [`ros_mcp/imece/boundary_tools.py`](../../ros_mcp/imece/boundary_tools.py) | filtered generic tools and compact subscription payloads |
 | [`ros_mcp/imece/helpers.py`](../../ros_mcp/imece/helpers.py) | `setpoint_relay`, `frame_guard`, `mode_guard`, `abort_watchdog` |
-| [`ros_mcp/imece/config.py`](../../ros_mcp/imece/config.py) | task specs, prompt assembly, deterministic `T4` interrupt rotation |
+| [`ros_mcp/imece/config.py`](../../ros_mcp/imece/config.py) | task specs, educational prompt profiles, prompt assembly, deterministic `T4` interrupt rotation |
 | [`ros_mcp/imece/gemini.py`](../../ros_mcp/imece/gemini.py) | Gemini CLI turn execution and trace capture |
 | [`ros_mcp/imece/rosbridge.py`](../../ros_mcp/imece/rosbridge.py) | rosbridge request and subscribe helpers used by the runner and monitor |
 | [`ros_mcp/imece/monitor.py`](../../ros_mcp/imece/monitor.py) | runtime state capture used for scoring and diagnostics |
 | [`ros_mcp/imece/scoring.py`](../../ros_mcp/imece/scoring.py) | task success logic shared by runtime and offline audit |
 | [`ros_mcp/imece/analysis.py`](../../ros_mcp/imece/analysis.py) | failure classification, helper selection, audit generation |
-| [`ros_mcp/imece/runner.py`](../../ros_mcp/imece/runner.py) | CLI entrypoint for episode, batch, phase, analysis, and audit workflows |
+| [`ros_mcp/imece/runner.py`](../../ros_mcp/imece/runner.py) | CLI entrypoint for episode, batch, phase, educational-batch, analysis, and audit workflows |
 
 ### Scripts
 

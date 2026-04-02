@@ -94,6 +94,7 @@ Include:
 - what was held fixed
 - what changed
 - results from `batch_state.json`, `analysis.json`, and `audit.json`
+- for educational batches, the exact `prompt_level` ladder, the `prompt_variant` sibling IDs, and whether `T4` was excluded
 - newly supported claims
 - still unsupported claims
 
@@ -141,6 +142,7 @@ For every serious analysis pass, inspect:
 - What phase is this batch supposed to represent?
 - Is it preserved evidence or a scratch run?
 - What was fixed across the batch?
+- If it is an educational batch, which `prompt_level` ladder and which `prompt_variant` sibling IDs were crossed, and was only the first-turn prompt varied?
 - What changed relative to the previous preserved state?
 - What do `analysis.json` and `audit.json` say under current scoring?
 - Which paper claims become stronger, and which still remain unsupported?
@@ -187,15 +189,15 @@ Safe current claims are narrower:
 - use exact batch IDs, task IDs, and condition IDs
 - avoid vague references such as `latest run` or `current result` without naming the batch
 
-## 8. Local-only Rule
+## 8. Commit Rule
 
-These IMECE docs are currently being used as local working documents.
+Treat these IMECE docs like any other repo artifact.
 Do not commit or publish changes to them unless the user explicitly asks for that.
 
-If asked to modify them:
+If asked to modify them without a commit request:
 
 - make the minimum proportional change
-- keep the changes local
+- leave the edits uncommitted
 - state clearly in the final response what was edited
 
 ## 9. Completion Checklist for Agent Documentation Work

@@ -57,6 +57,7 @@ Available subcommands:
 - `run-real-episode`
 - `run-batch`
 - `run-phase`
+- `run-educational-batch`
 - `analyze-batch`
 - `audit-batch`
 - `plan-study`
@@ -79,6 +80,8 @@ These arguments appear on most execution commands.
 | `--batch-id` | name of the output batch directory |
 | `--clean-existing` | remove an existing episode directory before rerunning that episode |
 | `--progress` / `--no-progress` | enable or suppress terminal progress logs |
+| `--prompt-level` | single-episode educational reading-level profile for `run-episode` or `run-real-episode` |
+| `--prompt-variant` | single-episode sibling prompt ID within the selected reading level |
 
 ## 4. Batch-control Arguments
 
@@ -89,6 +92,8 @@ These matter for `run-batch` and `run-phase`.
 | `--conditions` | explicit condition list for a custom batch |
 | `--tasks` | explicit task list for a custom batch |
 | `--repetitions` | repetitions per condition-task pair for a custom batch |
+| `--prompt-levels` | reading-level profiles to cross with the task matrix in `run-batch` or `run-educational-batch` |
+| `--prompt-variants` | sibling prompt IDs to cross within each selected reading level |
 | `--freeze-c2` | write updated helper-freeze output after successful analysis |
 | `--resume` | continue from `batch_state.json` and skip completed episodes |
 | `--max-attempts` | cap retry attempts for infrastructure-failed episodes |
@@ -236,7 +241,59 @@ Important:
 
 Do not treat repeated manual `run-real-episode` calls as an official real-flight batch unless you preserve them deliberately as one coherent real-flight batch record.
 
-## 10. Analyze and Audit a Batch
+## 10. Educational Prompt Sweep
+
+The educational sweep is a separate `C2`-only simulation batch.
+It is not a replacement for `official_sim`.
+It varies only the first-turn task prompt.
+The point is to test whether the interface remains usable when the same task is written at visibly different student reading levels.
+
+This sweep currently excludes `T4`.
+`T4` is dominated by the fixed second-turn correction prompt, so it would muddy a first-turn readability study.
+
+Standard command:
+
+```bash
+uv run python -m ros_mcp.imece.runner run-educational-batch \
+  --batch-id educational-sim-001 \
+  --resume \
+  --max-attempts 3
+```
+
+What it runs by default:
+
+- condition: `C2`
+- tasks: `T1`, `T2`, `T3`
+- prompt levels: `elementary`, `middle`, `high`, `college`
+- sibling prompts: `a`, `b`, `c`
+- repetitions: `1`
+- total: `36`
+
+How to read the prompt fields:
+
+- `prompt_level` is the actual educational contrast
+- `prompt_variant` is only a within-level sibling prompt ID
+- `a / b / c` should not be interpreted as a second difficulty ladder
+
+What stays fixed:
+
+- the `C2` helper subset
+- the clarification replies already defined by the runner
+- all non-educational task logic in the prompt scaffold
+
+To run only one profiled episode manually:
+
+```bash
+uv run python -m ros_mcp.imece.runner run-episode \
+  --condition C2 \
+  --task T3 \
+  --episode-index 1 \
+  --prompt-level elementary \
+  --prompt-variant b \
+  --batch-id educational-scratch
+```
+
+## 11. Analyze and Audit a Batch
 
 ### Analyze
 
@@ -258,7 +315,7 @@ uv run python -m ros_mcp.imece.runner audit-batch \
 `run-batch` and `run-phase` already write `analysis.json` and `audit.json` automatically after the batch completes.
 Manual re-analysis is for post hoc updates or explicit re-auditing.
 
-## 11. Plan the Study
+## 12. Plan the Study
 
 ```bash
 uv run python -m ros_mcp.imece.runner plan-study
@@ -266,7 +323,7 @@ uv run python -m ros_mcp.imece.runner plan-study
 
 This prints the official episode counts implied by the current specification.
 
-## 12. Artifact Layout
+## 13. Artifact Layout
 
 Each batch writes:
 
@@ -330,3 +387,7 @@ This separation matters. Control failures are evidence. Connector or execution-t
 - the runner loads missing variables from repo-local `.env` before launching Gemini CLI
 - `T4` uses a two-turn pattern in one Gemini session
 - `subscribe_for_duration` returns compact summaries rather than flooding the model context
+
+For educational prompt batches, the episode path includes the prompt profile:
+
+- `<condition>/<task>/<prompt_level>/<prompt_variant>/episode-01/`

@@ -97,3 +97,80 @@ def test_r2_prompt_reuses_translation_protocol():
     assert "Take off, move one meter forward, hover, and land." in prompt
     assert "Translation execution protocol:" in prompt
     assert "Use exactly two motion targets" in prompt
+
+
+def test_educational_prompt_profile_replaces_task_prompt():
+    prompt = build_episode_prompt(
+        "C2",
+        "T3",
+        1,
+        "127.0.0.1",
+        9090,
+        selected_helpers=["setpoint_relay"],
+        prompt_level="elementary",
+        prompt_variant="c",
+    )
+    assert "prompt_level: `elementary`" in prompt
+    assert "prompt_variant: `c`" in prompt
+    assert (
+        "Go up to about one meter. Fly a one-meter square. Come back near the start. Come down and land."
+        in prompt
+    )
+    assert "Take off, fly a square with one-meter sides, return near the start, and land." not in prompt
+
+
+def test_prompt_profile_requires_level_and_variant_together():
+    try:
+        build_episode_prompt("C2", "T1", 1, "127.0.0.1", 9090, prompt_level="elementary")
+    except ValueError as exc:
+        assert "prompt_level and prompt_variant must be provided together" in str(exc)
+    else:
+        raise AssertionError("expected prompt profile validation error")
+
+
+def test_t4_educational_prompt_profile_is_not_supported():
+    try:
+        build_episode_prompt(
+            "C2",
+            "T4",
+            1,
+            "127.0.0.1",
+            9090,
+            prompt_level="elementary",
+            prompt_variant="a",
+        )
+    except ValueError as exc:
+        assert "defined only for T1, T2, T3" in str(exc)
+    else:
+        raise AssertionError("expected unsupported-task validation error")
+
+
+def test_educational_prompt_profiles_show_level_and_variant_contrast():
+    elementary_prompt = build_episode_prompt(
+        "C2",
+        "T1",
+        1,
+        "127.0.0.1",
+        9090,
+        selected_helpers=["setpoint_relay"],
+        prompt_level="elementary",
+        prompt_variant="a",
+    )
+    college_prompt = build_episode_prompt(
+        "C2",
+        "T1",
+        1,
+        "127.0.0.1",
+        9090,
+        selected_helpers=["setpoint_relay"],
+        prompt_level="college",
+        prompt_variant="c",
+    )
+
+    elementary_task_prompt = elementary_prompt.split("Task prompt:\n", 1)[1]
+    college_task_prompt = college_prompt.split("Task prompt:\n", 1)[1]
+
+    assert "Make the drone go up. Stop when it is about one meter high. Wait there for five seconds. Then bring it down and land." in elementary_task_prompt
+    assert "Perform takeoff to approximately one meter, maintain a five-second hover, and execute landing." in college_task_prompt
+    assert elementary_task_prompt.count(".") >= 4
+    assert college_task_prompt.count(".") <= 1

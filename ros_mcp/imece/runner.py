@@ -14,7 +14,16 @@ from pathlib import Path
 from typing import Any
 
 from .analysis import analyze_batch, audit_batch, classify_episode_report
-from .config import build_episode_prompt, load_c2_freeze, resolve_t4_interrupt, resolve_task_spec
+from .config import (
+    EDUCATIONAL_PROMPT_TASKS,
+    PROMPT_LEVELS,
+    PROMPT_VARIANTS,
+    build_episode_prompt,
+    load_c2_freeze,
+    resolve_prompt_profile,
+    resolve_t4_interrupt,
+    resolve_task_spec,
+)
 from .constants import (
     ARMING_SERVICE,
     ARMING_SERVICE_TYPE,
@@ -51,9 +60,16 @@ class EpisodeMatrixEntry:
     condition: str
     task_id: str
     episode_index: int
+    prompt_level: str | None = None
+    prompt_variant: str | None = None
 
     @property
     def key(self) -> str:
+        if self.prompt_level and self.prompt_variant:
+            return (
+                f"{self.condition}:{self.task_id}:{self.prompt_level}:"
+                f"{self.prompt_variant}:{self.episode_index:02d}"
+            )
         return f"{self.condition}:{self.task_id}:{self.episode_index:02d}"
 
 
@@ -238,22 +254,55 @@ def _collect_runtime_metadata(
     }
 
 
+def _prompt_profile_pairs(
+    prompt_levels: list[str] | tuple[str, ...] | None,
+    prompt_variants: list[str] | tuple[str, ...] | None,
+) -> list[tuple[str | None, str | None]]:
+    if not prompt_levels and not prompt_variants:
+        return [(None, None)]
+    if not prompt_levels or not prompt_variants:
+        raise ValueError("prompt levels and prompt variants must be provided together")
+    pairs: list[tuple[str | None, str | None]] = []
+    for level in prompt_levels:
+        for variant in prompt_variants:
+            pairs.append(resolve_prompt_profile(level, variant))
+    return pairs
+
+
 def build_episode_matrix(
     conditions: list[str] | tuple[str, ...],
     tasks: list[str] | tuple[str, ...],
     repetitions: int,
+    *,
+    prompt_levels: list[str] | tuple[str, ...] | None = None,
+    prompt_variants: list[str] | tuple[str, ...] | None = None,
 ) -> list[EpisodeMatrixEntry]:
     matrix: list[EpisodeMatrixEntry] = []
+    prompt_profiles = _prompt_profile_pairs(prompt_levels, prompt_variants)
+    if prompt_profiles != [(None, None)]:
+        unsupported = [
+            resolve_task_spec(task_id).task_id
+            for task_id in tasks
+            if resolve_task_spec(task_id).task_id not in EDUCATIONAL_PROMPT_TASKS
+        ]
+        if unsupported:
+            supported = ", ".join(EDUCATIONAL_PROMPT_TASKS)
+            raise ValueError(
+                f"Educational prompt profiles are defined only for {supported}; got {', '.join(sorted(set(unsupported)))}"
+            )
     for condition in conditions:
         for task_id in tasks:
-            for episode_index in range(1, repetitions + 1):
-                matrix.append(
-                    EpisodeMatrixEntry(
-                        condition=condition,
-                        task_id=task_id,
-                        episode_index=episode_index,
+            for prompt_level, prompt_variant in prompt_profiles:
+                for episode_index in range(1, repetitions + 1):
+                    matrix.append(
+                        EpisodeMatrixEntry(
+                            condition=condition,
+                            task_id=task_id,
+                            episode_index=episode_index,
+                            prompt_level=prompt_level,
+                            prompt_variant=prompt_variant,
+                        )
                     )
-                )
     return matrix
 
 
@@ -294,7 +343,10 @@ def _batch_state_path(batch_root: Path) -> Path:
 
 
 def _episode_dir_for(batch_root: Path, spec: EpisodeMatrixEntry) -> Path:
-    return batch_root / spec.condition / spec.task_id / f"episode-{spec.episode_index:02d}"
+    base_dir = batch_root / spec.condition / spec.task_id
+    if spec.prompt_level and spec.prompt_variant:
+        base_dir = base_dir / spec.prompt_level / spec.prompt_variant
+    return base_dir / f"episode-{spec.episode_index:02d}"
 
 
 def _episode_record(spec: EpisodeMatrixEntry) -> dict[str, Any]:
@@ -302,6 +354,8 @@ def _episode_record(spec: EpisodeMatrixEntry) -> dict[str, Any]:
         "condition": spec.condition,
         "task_id": spec.task_id,
         "episode_index": spec.episode_index,
+        "prompt_level": spec.prompt_level,
+        "prompt_variant": spec.prompt_variant,
         "attempts": 0,
         "status": "pending",
         "last_error": None,
@@ -771,10 +825,22 @@ def _task_success(task_id: str, report: dict[str, Any]) -> bool:
 
 def _run_configured_episode(args: argparse.Namespace, *, execution_mode: str) -> Path:
     task_spec = resolve_task_spec(args.task)
-    batch_root = Path(args.output_root)
+    output_root = Path(args.output_root)
     batch_id = args.batch_id or _now_stamp()
     condition_label = args.condition.upper()
-    episode_dir = batch_root / batch_id / condition_label / task_spec.task_id / f"episode-{args.episode_index:02d}"
+    prompt_level, prompt_variant = resolve_prompt_profile(
+        getattr(args, "prompt_level", None),
+        getattr(args, "prompt_variant", None),
+    )
+    episode_spec = EpisodeMatrixEntry(
+        condition=condition_label,
+        task_id=task_spec.task_id,
+        episode_index=args.episode_index,
+        prompt_level=prompt_level,
+        prompt_variant=prompt_variant,
+    )
+    batch_root = output_root / batch_id
+    episode_dir = _episode_dir_for(batch_root, episode_spec)
     if getattr(args, "clean_existing", False) and episode_dir.exists():
         shutil.rmtree(episode_dir)
     episode_dir.mkdir(parents=True, exist_ok=True)
@@ -810,6 +876,8 @@ def _run_configured_episode(args: argparse.Namespace, *, execution_mode: str) ->
         rosbridge_ip,
         rosbridge_port,
         selected_helpers=selected_helpers,
+        prompt_level=prompt_level,
+        prompt_variant=prompt_variant,
     )
     (episode_dir / "prompt.txt").write_text(prompt + "\n", encoding="utf-8")
 
@@ -944,6 +1012,8 @@ def _run_configured_episode(args: argparse.Namespace, *, execution_mode: str) ->
             "task_name": task_spec.title,
             "execution_mode": execution_mode,
             "episode_index": args.episode_index,
+            "prompt_level": prompt_level,
+            "prompt_variant": prompt_variant,
             "session_id": resume_session_id,
             "terminal_label": terminal_label,
             "terminal_payload": terminal_payload,
@@ -990,6 +1060,8 @@ def _run_configured_episode(args: argparse.Namespace, *, execution_mode: str) ->
                 "task_id": task_spec.task_id,
                 "task_name": task_spec.title,
                 "execution_mode": execution_mode,
+                "prompt_level": prompt_level,
+                "prompt_variant": prompt_variant,
                 "selected_helpers": selected_helpers,
                 "runtime_metadata": runtime_metadata,
                 "turns": turns,
@@ -1061,6 +1133,8 @@ def _execute_batch_specs(
         episode_args.episode_index = spec.episode_index
         episode_args.clean_existing = True
         episode_args._from_batch = True
+        episode_args.prompt_level = spec.prompt_level
+        episode_args.prompt_variant = spec.prompt_variant
 
         episode_dir = _episode_dir_for(batch_root, spec)
         quota_warning = None
@@ -1112,7 +1186,13 @@ def _execute_batch_specs(
 def run_batch(args: argparse.Namespace) -> Path:
     batch_id = args.batch_id or _now_stamp()
     batch_root = Path(args.output_root) / batch_id
-    matrix = build_episode_matrix(args.conditions, args.tasks, args.repetitions)
+    matrix = build_episode_matrix(
+        args.conditions,
+        args.tasks,
+        args.repetitions,
+        prompt_levels=getattr(args, "prompt_levels", None),
+        prompt_variants=getattr(args, "prompt_variants", None),
+    )
     state = _load_or_init_batch_state(
         batch_root=batch_root,
         batch_id=batch_id,
@@ -1179,8 +1259,20 @@ def run_phase(args: argparse.Namespace) -> Path:
     batch_args.tasks = list(phase.tasks)
     batch_args.repetitions = phase.repetitions
     batch_args.phase = phase.name
+    batch_args.prompt_levels = None
+    batch_args.prompt_variants = None
     if args.phase == "discovery" and not args.freeze_c2:
         batch_args.freeze_c2 = True
+    return run_batch(batch_args)
+
+
+def run_educational_batch(args: argparse.Namespace) -> Path:
+    batch_args = argparse.Namespace(**vars(args))
+    batch_args.conditions = ["C2"]
+    batch_args.tasks = list(args.tasks)
+    batch_args.repetitions = 1
+    batch_args.phase = "educational_sim"
+    batch_args.freeze_c2 = False
     return run_batch(batch_args)
 
 
@@ -1206,14 +1298,20 @@ def build_parser() -> argparse.ArgumentParser:
             default=True,
         )
 
+    def add_prompt_profile(subparser: argparse.ArgumentParser) -> None:
+        subparser.add_argument("--prompt-level", choices=list(PROMPT_LEVELS))
+        subparser.add_argument("--prompt-variant", choices=list(PROMPT_VARIANTS))
+
     episode = subparsers.add_parser("run-episode")
     add_shared(episode)
+    add_prompt_profile(episode)
     episode.add_argument("--condition", choices=["C0", "C1", "C2"], required=True)
     episode.add_argument("--task", choices=["T1", "T2", "T3", "T4"], required=True)
     episode.add_argument("--episode-index", type=int, required=True)
 
     real_episode = subparsers.add_parser("run-real-episode")
     add_shared(real_episode)
+    add_prompt_profile(real_episode)
     real_episode.add_argument("--condition", choices=["C0", "C1", "C2"], required=True)
     real_episode.add_argument("--task", choices=["T1", "T2", "T3", "T4"], required=True)
     real_episode.add_argument("--episode-index", type=int, required=True)
@@ -1223,6 +1321,8 @@ def build_parser() -> argparse.ArgumentParser:
     batch.add_argument("--conditions", nargs="+", default=["C0", "C1"])
     batch.add_argument("--tasks", nargs="+", default=["T1", "T2", "T3", "T4"])
     batch.add_argument("--repetitions", type=int, default=5)
+    batch.add_argument("--prompt-levels", nargs="+", choices=list(PROMPT_LEVELS))
+    batch.add_argument("--prompt-variants", nargs="+", choices=list(PROMPT_VARIANTS))
     batch.add_argument("--freeze-c2", action="store_true")
     batch.add_argument("--resume", action="store_true")
     batch.add_argument("--max-attempts", type=int, default=3)
@@ -1239,6 +1339,29 @@ def build_parser() -> argparse.ArgumentParser:
     phase.add_argument("--resume", action="store_true")
     phase.add_argument("--max-attempts", type=int, default=3)
     phase.add_argument(
+        "--retry-at-end",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+
+    educational = subparsers.add_parser("run-educational-batch")
+    add_shared(educational)
+    educational.add_argument("--tasks", nargs="+", choices=list(EDUCATIONAL_PROMPT_TASKS), default=list(EDUCATIONAL_PROMPT_TASKS))
+    educational.add_argument(
+        "--prompt-levels",
+        nargs="+",
+        choices=list(PROMPT_LEVELS),
+        default=list(PROMPT_LEVELS),
+    )
+    educational.add_argument(
+        "--prompt-variants",
+        nargs="+",
+        choices=list(PROMPT_VARIANTS),
+        default=list(PROMPT_VARIANTS),
+    )
+    educational.add_argument("--resume", action="store_true")
+    educational.add_argument("--max-attempts", type=int, default=3)
+    educational.add_argument(
         "--retry-at-end",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -1269,6 +1392,8 @@ def main() -> None:
         run_batch(args)
     elif args.command == "run-phase":
         run_phase(args)
+    elif args.command == "run-educational-batch":
+        run_educational_batch(args)
     elif args.command == "analyze-batch":
         analysis = analyze_batch(Path(args.batch_dir))
         _write_json(Path(args.batch_dir) / "analysis.json", analysis)
