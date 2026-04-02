@@ -312,28 +312,6 @@ The real-flight phase reuses the same task IDs as simulation:
 ## 12. Educational Prompt Extension
 
 This extension is separate from the `C0 -> C1 -> C2` boundary study.
-It does not redefine the helper comparison.
-It asks a narrower follow-on question:
-
-- after the control boundary is fixed at `C2`, how robust is the interface to user prompts written at clearly different student reading levels?
-
-### Why the Extension Is `C2`-only
-
-- the boundary study already establishes that `C0` and `C1` are too brittle for reliable beginner flight
-- the educational question is about user-facing language variation, not about re-running the helper-necessity argument
-- keeping `C2` fixed isolates prompt wording as the intended experimental change
-
-### Why `T4` Is Excluded
-
-The educational sweep currently covers only `T1-T3`.
-`T4` is intentionally left out.
-The reason is methodological rather than operational:
-
-- `T4` is dominated by the fixed second-turn correction prompt
-- the educational study is supposed to test first-turn instruction comprehension
-- varying only the first prompt for `T4` would add cost but blur interpretation
-
-`T4` therefore remains part of the boundary and safety study, not the educational prompt-profile sweep.
 
 ### Reader and Task Grounding
 
@@ -369,30 +347,14 @@ Reference links:
 - [NIH Plain Language: Getting Started or Brushing Up](https://www.nih.gov/sites/default/files/2025-02/nih-plain-language-getting-started-brushing-up.pdf)
 - [National Archives Plain Language Principles](https://www.archives.gov/open/plain-writing/10-principles.html)
 
-### Prompt-design Decision
-
-Earlier drafts experimented with a separate global variant axis, but that structure still made the study hard to read because the level difference was not visually dominant enough.
-The current design therefore makes the level axis do the real experimental work.
-
-What changes now:
-
-- `elementary / middle / high / college` is the primary contrast
-- `prompt_variant` is no longer a second difficulty axis
-- `prompt_variant = a / b / c` now means only three sibling phrasings within the same level
-
-This keeps the educational claim simple:
-
-- level is what should drive the main contrast
-- `a / b / c` only checks that the result is not an artifact of one exact wording string
-
 ### Level Rubric
 
-| Level | Visible signature | Lexical style | Sentence style | Expected reader support |
-| --- | --- | --- | --- | --- |
-| `elementary` | obviously stepwise and concrete | `go up`, `bring it down`, `keep it still` | mostly 3-4 short sentences, one action per sentence | highest support |
-| `middle` | school-style procedural command | `take off`, `hover`, `return` | 2-3 short sentences or a short clause chain | high support |
-| `high` | more academic and compressed | `ascend`, `maintain`, `complete` | usually one dense sentence | moderate support |
-| `college` | most compressed adult phrasing | `establish`, `execute`, `trajectory`, `interval` | densest phrasing, more nominalized wording | lowest support |
+| Level | Visible signature | Lexical style | Sentence style |
+| --- | --- | --- | --- |
+| `elementary` | obviously stepwise and concrete | `go up`, `bring it down`, `keep it still` | mostly 3-4 short sentences, one action per sentence |
+| `middle` | school-style procedural command | `take off`, `hover`, `return` | 2-3 short sentences or a short clause chain |
+| `high` | more academic and compressed | `ascend`, `maintain`, `complete` | usually one dense sentence |
+| `college` | most compressed adult phrasing | `establish`, `execute`, `trajectory`, `interval` | densest phrasing, more nominalized wording |
 
 ### Representative `T1` Ladder
 
@@ -411,7 +373,6 @@ They only provide small within-level paraphrases so the educational result is no
 
 ### Fixed Prompt-profile Rules
 
-- vary only the first-turn user prompt
 - keep task semantics identical across all profiles
 - keep the educational sweep on `T1`, `T2`, and `T3` only
 - do not add hidden hints such as `OFFBOARD`, `setpoint`, `ENU`, `PX4`, or `MAVROS`

@@ -1,382 +1,433 @@
-# IMECE 연구 사양 및 구현 맵 (Study Specification and Implementation Map)
+# IMECE 연구 사양 및 구현 체계 맵 (Implementation Map)
 
-이 문서는 IMECE 단계적 경계 연구(staged boundary study)에 대한 규범적인(normative) 단일 진실 공급원입니다.
+이 문서는 IMECE 단계적 조건 부과(staged boundary) 연구에 대한 규범적이고 공식적인 정보의 원천입니다.
 
-다음의 경우에 이 파일을 사용하세요:
+이 문서의 용도는 다음과 같습니다:
+- 논문에서 의도하는 전개의 논리적 흐름 파악
+- 고정된 실험 범위 및 태스크 성공의 판별 기준 제공
+- 현재 저장소(repository)에 구현된 시스템 및 아키텍처 맵 확인
+- 각각의 연구 페이즈(phase)가 지니는 정확한 의미 확인
 
-- 논문의 의도된 논증 흐름 확인
-- 고정된 실험 경계 및 성공 기준 확인
-- 리포지토리의 현재 구현 맵 확인
-- 각 연구 페이즈(phase)의 정확한 의미 확인
+실제 실행된 내역, 보존된 데이터, 논문을 위해 분석된 내용에 대해서는 [`experiment-record-kor.md`](./experiment-record-kor.md)를 참조하십시오.
+실행 명령어 구성 및 조작자의 단계별 지침은 [`runbook-kor.md`](./runbook-kor.md)를 참조하십시오.
+향후 에이전트가 실험 결과를 어떻게 분석하고 이 문서들을 어떻게 갱신해야 하는지에 대해서는 [`agent-development-guide-kor.md`](./agent-development-guide-kor.md)를 참조하십시오.
 
-실제로 실행된 내역에 대한 보존된 증거와 논문용 결과 해석에 대해서는 [`experiment-record-kor.md`](./experiment-record-kor.md)를 사용하세요.
-명령어 및 운영자 단계에 대해서는 [`runbook-kor.md`](./runbook-kor.md)를 사용하세요.
-향후 에이전트가 결과를 분석하고 문서 세트를 업데이트하는 방법에 대해서는 [`agent-development-guide-kor.md`](./agent-development-guide-kor.md)를 사용하세요.
+## 1. 연구의 방향성 (Study Positioning)
 
-## 1. 연구 포지셔닝 (Study Positioning)
+이 연구는 좁고 명확한 한 가지 질문에서 출발합니다:
+- 기성 LLM(대형 언어 모델)이 오직 일반적인 ROS 수준의 인터페이스 도구만 가지고 PX4 드론을 얼마나 원활히 조작할 수 있는가?
+- 오직 프롬프트만을 통한 지식 안내 방식이 한계에 부딪히는 지점은 어디인가?
+- 드론 환경만을 위해 특별히 설계된 MCP(Model Context Protocol) 시스템 도입이 정당화되기 위해, 최소한 어떤 형태의 의미론적이지 않은 안정화 수단이 필요한가?
 
-이 연구는 다음과 같은 좁은 범주의 질문을 던집니다:
+따라서 이 연구의 논문 전개 흐름은 단편적이지 않으며, 단계적으로 진행됩니다:
+1. `C0` 조건은 아무런 지식이 주어지지 않은 일반 ROS-MCP 베이스라인의 순수한 한계를 측정합니다.
+2. `C1` 조건은 프롬프트상의 지식 부여만으로 베이스라인의 한계를 복구할 수 있는지 테스트합니다.
+3. `C2` 조건은 디스커버리 분석 등에서 반복적으로 노출된 로우-레벨 단위의 실패 요소(프롬프트만으로는 도저히 복구가 불가능했던 문제들)를 기반으로 하여, 최소한의 헬퍼 레이어만을 고정 추가한 상태를 통제 및 측정합니다.
 
-- 기성품(off-the-shelf) LLM이 일반적인(generic) ROS 레벨 도구만을 사용하여 PX4 드론을 어디까지 조작할 수 있는가?
-- 어느 시점에서 프롬프트 전용 가이드(prompt-only guidance)만으로는 충분하지 않게 되는가?
-- 드론에 특화된 MCP 설계가 정당화되기 전에 필요한 최소한의 비의미론적(non-semantic) 안정화 장치는 무엇인가?
-
-의도된 논문 흐름은 단일체(monolithic)가 아니라 단계적(staged)입니다:
-
-1. `C0`는 가공되지 않은 일반적인 ROS-MCP 베이스라인을 측정합니다.
-2. `C1`은 프롬프트 컨텍스트만으로 베이스라인을 복구할 수 있는지 테스트합니다.
-3. `C2`는 디스커버리(discovery) 단계에서 프롬프트가 복구하지 못한 로우 레벨 실패가 반복적으로 나타난 후에야 최소한의 고정된(frozen) 헬퍼 레이어를 추가합니다.
-
-따라서 이 연구는 일반적인 ROS 도구 표면(surface)이 모든 드론 제어에 충분하다는 주장이 아닙니다. 이는 일반적인 도구 사용이 언제 취약해지는지, 그리고 어떠한 최소한의 추가 지원이 필요한지에 대한 경계 연구(boundary study)입니다.
+결론적으로 이 연구는 일반적인 ROS 통제 인터페이스가 모든 드론을 제어하기에 완벽하고 충분하다는 주장을 하려는 것이 아닙니다. 오히려 일반적 수준의 범용 도구가 어느 한계선에서 망가지고 부서지는지, 그리고 이것이 원활하게 작동하려면 최소한 어떤 형태의 외적 구조 지원(support)이 투입되어야만 하는가를 탐구하는 경계 조건 연구(boundary study)입니다.
 
 ## 2. 연구 질문 (Research Questions)
 
 ### RQ1. 실현 가능성 (Feasibility)
+- 범용적인 ROS 수준의 도구 구성만으로도 PX4 입문 수준의 기본적인 비행 태스크를 달성할 수 있는가?
 
-- 일반적인 ROS 레벨 도구 선택이 기본 PX4 초보자 비행 태스크를 지원할 수 있는가?
+### RQ2. 실패 원인 (Failure Modes)
+- 범용적인 제어 도구를 투입했을 때, 시스템이 구체적으로 어느 지점에서 붕괴하고 오류를 내는가?
+- 어느 실패가 단순한 프롬프트 개선만으로 수리될 수 있으며, 반대로 어떤 실패가 결국 얇고 하위 수준의 헬퍼 레이어 지원을 받아야만 극복될 수 있는가?
 
-### RQ2. 실패 모드 (Failure Modes)
+### RQ3. 모형 전이성 (Transfer)
+- 시뮬레이션 환경에서 작동한 이러한 상호작용 패턴 형질이 통제된 실내 환경에서의 소규모 실제 비행 모델에도 안전하게 전이될 수 있는가?
 
-- 일반적인 도구 사용은 어느 지점에서 취약해지는가?
-- 어떤 실패가 프롬프트로 복구 가능하며, 어떤 실패가 얇은 로우 레벨 지원 레이어를 필요로 하는가?
+## 3. 주장의 경계 및 현재 연구 상태
 
-### RQ3. 전이 (Transfer)
+현재 보존된 증거 자료들은 다음과 같은 좁고 명확한 주장들만을 입증하고 지원합니다:
+- 디스커버리 데이터 분석은 대체 왜 고정(freeze)된 `C2` 헬퍼 서브셋이 필요한지에 대한 근거를 명확하게 제시합니다.
+- 현재 시스템이 고정 도입해 추가한 서브셋은 `setpoint_relay`, `mode_guard`, 그리고 `abort_watchdog` 입니다.
+- 이전에 남아있던 `T3` 정사각형 패턴의 오류 격차(gap)는 별도로 수행된 타겟 `C2` 배치 검증을 통해 성공적으로 완전히 치유되었음이 확인되었습니다.
+- 현재 보존된 기록 상태는 `official_sim` 공식 시뮬레이션의 대규모 등판 진입을 위해 완전히 충분히 구축된 상태입니다.
+- `official-sim-001` 평가는 계획된 실제 비행(real-flight) 단계에 진출시킬 수 있는 가장 견고한 베이스라인 조건으로 `C2`를 채택함을 명시적으로 규명했습니다.
 
-- 시뮬레이션에서 작동하는 상호작용 패턴이 통제된 실내 실제 비행 환경으로 최소 규모로 전이될 수 있는가?
+단, 현재 보존된 증거 자료만으로는 아직 다음과 같은 거대한 주장들을 입증할 수 없습니다:
+- `C2` 환경만 갖춰지면 `T1-T4` 복합 최종 과업 세트 전 영역을 퍼펙트하게 완전히 타파할 수 있다는 주장 (일부 한계가 여전히 보고되기 때문입니다.)
+- 실제 현장 비행에서의 확실한 모델 전이가 이미 완벽하게 확보되었고 실증되었다는 주장
+- 뚜렷하게 반복되는 프레임이나 부호(sign)의 오류마저도 고정 헬퍼 투입 근거로 채택되어 반영되었다는 주장 (현재 이 부분은 발생하지 않아 기각되었습니다.)
 
-## 3. 주장 경계 및 현재 연구 상태 (Claim Boundary and Current Study Status)
-
-현재 보존된 증거는 다음과 같은 좁은 범주의 주장만을 뒷받침합니다:
-
-- 디스커버리(discovery) 페이즈는 왜 고정된 `C2` 헬퍼 서브셋이 전혀 필요한지를 정당화합니다.
-- 현재 고정된 서브셋은 `setpoint_relay`, `mode_guard`, `abort_watchdog`입니다.
-- 남아있던 `T3` 정사각형 패턴의 격차(설계 간극)는 타겟팅된 `C2` 배치로 별도 검증되었습니다.
-- 현재 보존된 상태는 `official_sim`을 시작하기에 충분합니다.
-
-현재 보존된 증거는 다음과 같은 더 강력한 주장은 아직 뒷받침하지 않습니다:
-
-- `C2`가 최종 `T1-T4` 태스크 세트 전체에 걸쳐 완전히 검증되었다는 주장
-- 실제 비행으로의 전이(real-flight transfer)가 이미 시연되었다는 주장
-- 프레임/부호(frame/sign) 측면의 명시적이고 반복적인 실패가 보존된 헬퍼 고정의 근거 중 하나라는 주장
-
-운영 관점에서 이 연구는 다음과 같이 진행될 수 있습니다:
-
+운영 측면에서 연구의 진행 순서는 다음과 같습니다:
 1. `official_sim`
-2. 프로모션 게이트(promotion-gate) 결정
-3. 프로모션된 조건에 한해서만 `official_real` 진행
+2. 오직 `C2` 조건만을 사용한 `official_real` 진행
 
-## 4. 범위 및 경계 (Scope and Boundary)
+## 4. 범위 및 한계 (Scope and Boundary)
 
-### 범위 내 포함 사항 (In Scope)
+### 연구 범위 내 (In Scope)
+- `시동 (arm) / 시동 해제 (disarm)`
+- `이륙 / 호버링 / 착륙`
+- 근거리 내에서의 위치(local-position) 조작 비행
+- 시뮬레이션 내 비행 도중 발생하는 수정 명령 개입 혹은 실행 강제 중단
+- 상황에 대한 정보가 누락되었을 때의 질문(clarification) 기능 도입, 위험하거나 수행 불가능한 요청에 대한 안전한 거부 명령
+- 통제된 실내 환경 구축망 아래에서의 고장 및 오류 특성 판별
+- C2 조건에 한정된, 통제된 실내 실제 모형에서의 시뮬레이션 대 리얼(sim-to-real) 비행 이식 전이 증명
 
-- `arm / disarm`
-- `이륙(takeoff) / 호버링(hover) / 착륙(land)`
-- 단거리 로컬 위치(local-position) 이동
-- 시뮬레이션 내에서의 비행 중 궤도 수정 또는 중단(abort)
-- 질문(clarification) 및 안전한 거부(refusal) 방어 기재
-- 고정된 실내 스택 환경에서의 실패 특성화
-- 시뮬레이션 프로모션 게이트를 통과한 후에 한정한 시뮬레이션-실제 단계 전이(sim-to-real transfer)
+### 연구 범위 밖 (Out of Scope)
+- 복잡한 장애물 회피 기술
+- 인지 시스템이 무겁게 작용하는 고차원의 자율성
+- SLAM이나 고도의 플래닝(planning) 아키텍처 스택 도입
+- 기체 축 단위의 속도 제어를 주력 인터페이스로 삼는 조작
+- `takeoff()`, `goto()`, `fly_square()` 와 같은 비행체 전용 시맨틱(의미론적) API 계층 구축
+- 미션 플래너, 비헤이비어 트리(behavior trees), 자체 경로 생성기의 구축
+- 일련의 공식 에피소드를 진행할 때 발생하는 과거 실험망에 대한 인지적 학습이나 적응형 동적 기억 구조
 
-### 범위 제외 사항 (Out of Scope)
+## 5. 고정된 플랫폼 환경 (Fixed Platform Assumptions)
 
-- 장애물 회피 (obstacle avoidance)
-- 자율주행 중심의 높은 수준의 인지(perception-heavy autonomy)
-- SLAM 또는 경로 계획 스택
-- 기체 프레임 속도 제어를 메인 인터페이스로 사용하는 것
-- `takeoff()`, `goto()`, `fly_square()`와 같은 의미론적(semantic) 드론 API
-- 미션 실행기(mission executors), 행동 트리(behavior trees), 경로 생성기
-- 공식 에피소드 간의 적응형 장기 메모리 구성
-
-## 5. 고정 플랫폼 가정 (Fixed Platform Assumptions)
-
-- OS: `Ubuntu 24.04`
-- 미들웨어: `ROS 2 Jazzy`
+- 운영 체제: `Ubuntu 24.04`
+- 미들웨어 통신구조: `ROS 2 Jazzy`
 - 시뮬레이터: `Gazebo`
 - 오토파일럿: `PX4`
 - 브릿지: `MAVROS`
-- MCP 브릿지: `ros-mcp-server`
-- 에이전트 런타임: `Gemini CLI`
+- MCP 브릿지 체계: `ros-mcp-server`
+- 에이전트 런타임 환경: `Gemini CLI`
 
-공식 비교 단위는 에피소드당 하나의 완전히 새로운 Gemini CLI 세션을 뜻합니다.
-라우팅된 모델은 `auto`로 유지됩니다. 실제 라우팅된 모델명은 에피소드 트레이스(trace) 기록에 남겨져야 합니다.
+공식적인 측정 평가 단위는 각 에피소드마다 완전히 새롭게 초기화되는(fresh) Gemini CLI 세션 환경 1회로 한정됩니다.
+라우팅되는 모델은 `auto`로 설정된 상태를 기본 유지하며, 구체적으로 어떤 타겟 모델을 차용하여 적용했는지는 각각의 에피소드 진행 로그에 기록되어야 합니다.
 
-## 6. 제어 표면 경계 (Control Surface Boundary)
+## 6. 제어 권한 표면 경계망 (Control Surface Boundary)
 
-본 연구는 의도적으로 ros-mcp의 IMECE 전용 서브셋만 노출합니다.
+이 연구는 의도적으로 ros-mcp의 기능 중 IMECE 영역으로 좁게 한정된 서브셋 도달범위만을 에이전트에게 노출시킵니다.
 
-| 카테고리 | 허용된 표면 | 제외된 표면 | 이유 |
+| 카테고리 | 허용된 구역 (Allowed surface) | 제외된 구역 (Excluded surface) | 제외 사유 (Why) |
 | --- | --- | --- | --- |
-| 상태 관측 (State observation) | `/mavros/state`, `/mavros/local_position/pose`, `/mavros/battery` | 임의의 ROS topics, 노드 그래프, 파라미터들 | 태스크 완료, 점수 측정, 안전 점검에 충분한 정보 제공 |
-| 제어 출력 (Control output) | `/mavros/setpoint_position/local` | 속도 제어, 바디 프레임 제어, 미션 주제, 임의의 퍼블리시 타겟 | 본 연구를 로컬 위치(local-pose) 제어 수준으로 유지 |
-| 서비스 (Services) | `/mavros/set_mode`, `/mavros/cmd/arming` | 이착륙 등 의미론적인 MAVROS 비행 서비스 일체 | 에이전트가 모드 순서 추론 및 서보(시동)의 책임을 보존하도록 함 |
-| 일반 도구 계열 (Generic tool families) | topic/service introspection, subscribe, publish, call | 액션(actions), 파라미터, 특정 로봇 전용 도구, 관련 없는 표면 등 | 실패의 원인을 해석 및 특정(attribution) 가능하도록 제한함 |
+| 상태 관측 | `/mavros/state`, `/mavros/local_position/pose`, `/mavros/battery` | 임의적인 ROS 토픽, 노드 그래프 구성, 파라미터 값 설정 | 허용된 환경만으로 상황 파악, 채점, 안전 체계 구축에 충분함 |
+| 출력 제어 | `/mavros/setpoint_position/local` | 속도 제어, 바디 프레임 기반 제어, 미션 토픽 전달, 임의 타겟팅된 목적지 발행 권한 | 이 조치로써 연구 방향성을 오직 로컬-포즈 제어 한 우물에만 국한시키기 위함 |
+| 서비스 권한 | `/mavros/set_mode`, `/mavros/cmd/arming` | 이착륙 등의 시맨틱(문맥) 기반 비행 서비스 호출들 | 모드 오더의 추론 절차와 시동(arming)의 의도적인 책임감을 모델에게 전파 유지하기 위함 |
+| 일반 도구망 군 | 토픽과 서비스의 파악/조사, 구독, 발행, 데이터 호출 능력 | 액션 구조, 파라미터, 특별한 로봇의 전용 도구, 기타 연구 관련 없는 표면 구조 | 이탈 결함의 발생 이유가 어디서 기인했는지 쉽게 판별하기 쉽도록 해석성을 유지하기 위함 |
 
-향후 `official_sim` 실행에 사용될 공유된 일반 표면(shared generic surface)은 다음의 좁게 정의된 두 가지 측면에서만 안정화됩니다:
+향후 진척될 `official_sim` 평가를 위해 함께 투입되는 일반(generic) 평면 구역은 오로지 단 두 가지의 매우 좁은 허용 범위 안에서만 안정적으로 고정 유지됩니다:
+- 제공된 일반 도구들은 과거 스키마 구조와의 호환 오차 오류(`wait_for_previous` 와 같은 변수)를 피하기 위해 임시 변수망을 관용적으로 수용 반영함
+- `subscribe_for_duration` 기능을 쓸 때 에이전트가 처리하기 편하도록 `first_msg`, `last_msg`, `summary` 정보만을 간결하게 담아 요약 본으로 돌려줌.
 
-- 일반 도구는 과거의 스키마 구조 변경에 의한 이탈(drift) 실패 대신 잘못 입력된 `wait_for_previous` 필드를 정상적으로 허용합니다.
-- `subscribe_for_duration`은 내부에 `first_msg`, `last_msg` 및 `summary`를 지닌 압축된 페이로드 구조로 반환해 줍니다.
-
-이는 인터페이스 레벨의 안정화이지, 의미론적(semantic) 수준의 비행 프리미티브(primitive)가 아닙니다.
+이러한 고정 지원책들은 어디까지나 기초 인프라 통신의 규격 인터페이스를 방어하는 안정성을 위한 것이지, 본질적으로 비행을 뜻하는 시맨틱 구조(비행을 어떻게 하는 건지 직접 알려주는 구문 체계)에 가담해 도와주는 수단이 아닙니다.
 
 ## 7. 조건 (Conditions)
 
-| 조건 | 도구 표면 | 프롬프트 컨텍스트 | 헬퍼 레이어 | 의도된 역할 |
+| 조건 | 관여 도구 평면 권한 | 프롬프트 컨텍스트 | 가담 헬퍼 레이어 | 의도된 역할 수단 |
 | --- | --- | --- | --- | --- |
-| `C0` | 일반 ROS-MCP 도구만 | 연결 컨텍스트 외엔 없음 | 없음 | 가공되지 않은 일반적 베이스라인 |
-| `C1` | `C0`와 동일 | 5가지 운영 사실 추가 제공 | 없음 | 프롬프트 전용 복구 시도 |
-| `C2` | 동일한 일반 표면 | `C1`과 동일 | 고정된 최소 헬퍼 서브셋 | 최소한으로 요구되는 전송 및 안전 지원 |
+| `C0` | 일반 ROS-MCP 영역만 주어짐 | 단지 통신 연결 시도 시 주어지는 컨텍스트 외 존재안함 | 없음 | 완전한 날것의 제약을 가진 일반적 수준 기반 한계 테스트 지표 |
+| `C1` | `C0`과 동일 | 단결된 형태의 핵심 비행 운영 정보 사실 5가지 주입 | 없음 | 오직 프롬프트 지식 수혈만으로 복구를 모색 시전해 보는 비교 점검군 |
+| `C2` | 동일한 일반 평면 제어만 주어짐 | `C1`과 동일 | 강제 동결(freeze) 처리된 최소 규격의 헬퍼망 덧붙임 | 비행 수송 및 안전 방어선에 투여될 수 있는 최저의 마지노선 필수 지원 구획 제공 통제군 |
 
 ### C0
 
-`C0`는 드론 운용 힌트 없는 상태에서 반드시 실행 가능한 상태가 유지되어야 합니다.
-따라서 조건 산출물(condition artifact)은 다음의 세 가지만을 수행합니다:
+`C0`는 기본적으로 실행은 계속 유지될 수 있어야 하지만, 동시에 드론 조작법에 대한 편법성 지식이나 안내가 제공되어서도 안 됩니다.
+따라서 이 통제군에서 에이전트에게 제공되는 정보는 다음과 같이 단 세 가지 조건 아티팩트에 그칩니다:
+- 소속 구획 조건 이름 명시
+- 에이전트에게 현재 허용, 노출된 IMECE 지원 도구 체계만 전용으로 다루어 쓸 것을 지시
+- 작전 이행 전에 모델 스스로 먼저 자신이 사용 가능한 ROS 시스템상 통제 허용 표면망이 어떤 구성인지 직접 확인, 조사를 할 것
 
-- 조건 이름을 명시함.
-- 에이전트의 도구를 노출된 IMECE 전용 도구들로만 한정함.
-- 에이전트가 행동을 취하기 전에 먼저 승인된 표면을 구조적으로 조사하라고 지시함.
-
-이것은 실행 가능한 베이스라인이지 절대 불가능한 블라인드형(blind) 베이스라인이 아닙니다.
+이것은 실행 가능한 통제 베이스라인이지 아무것도 지각하지 못한 채 아무 작동조차 하지 못하는 불가항력의 맹인 블라인드 실험군이 아닙니다.
 
 ### C1
 
-`C1`은 정확히 5가지 운영 사실을 추가합니다:
+`C1`에는 정확히 다섯 개의 운영상의 사실에 대한 프롬프트 단서 정보가 추가 제공됩니다:
+- 로컬 포지션은 `ENU` 좌표 축 기반을 사용함
+- `OFFBOARD` 모드로 바뀌기 전에 반드시 셋포인트 사전 확보 전송(`prestream`) 과정이 먼저 준비 필요함
+- 비행 중에는 셋포인트 데이터 지속 전송 수신이 끊기지 않아야 함
+- 만약 모호한 지시라 판단될 경우 지시자에게 단답형 형태의 단 한 문장 단일 질문으로 확답을 요구해야함
+- 마지막 최종 하방 착륙 유도 통제시에는 되도록이면 확실한 `LAND` 모드로 전환 하방을 타겟팅 권고함.
 
-- 로컬 위치는 `ENU` 좌표계 축을 따릅니다.
-- 모드를 일시적으로라도 전환하기 이전에 `OFFBOARD` 모드는 셋포인트 스트리밍 사전 전송 과정이 반드시 요구됩니다.
-- 비행 중에는 간격 간 단절 없이 셋포인트 데이터 스트리밍이 지속되어야 합니다.
-- 불명확한 점이 있을 땐 짧은 확인 질문을 유도해야 합니다.
-- 최종 착륙 접근 시에는 `LAND` 모드를 선택적으로 지향해야 합니다.
-
-`C1`은 "가장 좋은 최적의(best possible) 프롬프팅"을 고의적으로 표방하지 않습니다. 즉, 허용되는 가장 최소한 크기의 프롬프트 보정(repair) 수단입니다.
+`C1`은 일부러 "최상의 퍼펙트한 최고의 프롬프트 수혈" 따위를 목표로 고안된 정보가 아닙니다. 오직 최소한의 기본 정보 제공만으로 얼마큼의 시스템 복구 효율을 지니는지 보기 위한 가장 작은 형태의 프롬프트 전용 복구 지표군입니다.
 
 ### C2
 
-`C2`는 동일한 수준의 `C1` 기반 프롬프트 및 도구 표면을 유지한 상태에서, 반복된 디스커버리 페이즈 실패가 근거로 작용하는 고정된(frozen) 범위의 헬퍼 서브셋만을 얇게 추가(레이어드)합니다.
+`C2`는 앞선 `C1` 통제망에서 투입한 동일 프롬프트 지식망 체재를 그대로 고수하되 그 위에 딱 하나, 디스커버리 감사 기록에 의해 수리 불가능으로 판별되어 타당성을 얻어낸 최소 단위 고정(freeze) 헬퍼망을 입혀 고수합니다.
 
-#### 허용된 헬퍼 카탈로그
+#### 채택 허가된 헬퍼 카탈로그 수단 규격
 
 - `setpoint_relay`
-  - 에이전트가 마지막으로 검증된 대상 구조에 발행한 로컬 포즈 타겟을 `20 Hz` 주기로 유지하여 전송함.
+  - 에이전트가 의도한 마지막의 타당성 목표치를 로컬 포지션 좌표계에서 `20 Hz` 통신 주기에 맞춰 알아서 연속 전파 유지함
 - `frame_guard`
-  - `ENU` 좌표계 기반의 로컬 포즈 관례를 노멀라이징(표준화/교정)하고, 명백히 일치하지 않는 프레임과 부호 방향 불일치 에러를 튕겨냄.
+  - `ENU` 방식의 로컬 포지션 정보들을 규범화 시키며, 아주 명백히 빗나간 거대한 기조의 프레임 연산/부호 실수 모순의 무모한 타겟 산출은 잘라버리며 지적 거부 대응시킴
 - `mode_guard`
-  - 기체 접근 방식에 대한 가장 최소한의 안전 순서 모드를 강제함: 사전 스트리밍(prestream) -> `OFFBOARD` -> 시동(arm) -> 착륙모드(`LAND`)
+  - 사전 전송 수신 -> `OFFBOARD` 전환 -> 시동(arm) -> 지령 종료 착지 하향 유도(`LAND`) 라는 일련의 최소 필수 불가결 방어 안전 순서도를 무리없이 보장케 전개함
 - `abort_watchdog`
-  - 타임아웃 지연 시나리오나 사용자가 발생시킨 런타임 종료/회피 이벤트에 대응하여 최종 `LAND` 모드 착륙 강제화.
+  - 에이전트 도달 불능 맹점의 타임아웃 셧다운시나 도달 중 통신 파기 위험 조난 탈선 도피 등 오 조작시 `LAND` 강제 명령으로 셧다운 안정 착지를 보장 확보함
 
-#### 현재 고정된(Frozen) 서브셋
+#### 현재 실제 고정 도입된 헬퍼 서브셋 집합망 (Currently Frozen Subset)
 
 - `setpoint_relay`
 - `mode_guard`
 - `abort_watchdog`
 
-`frame_guard`는 여전히 코드로 구현되어 있으나 현재의 분류기(classifier) 기준 하에 명백히 반복적인 프레임/방향 불일치 오류를 현재 디스커버리 감사 보고서에서는 증명하지 않아 활성 대상의 서브셋 고정 카테고리에 편입되지 않았습니다.
+코드망 구조상으론 명확히 존재함에도 불구하고 위 `frame_guard` 보속 지원 헬퍼장치는 덧붙임 헬퍼 구성에서 현재 이탈 방치되었습니다. 이 조치는 실제 사전 디스커버리 분석 통제상에서 이들이 현재의 분석 기준 아래 명증하는 막대한 부호 탈락 역조 에러 등을 파생시키는 대 참사를 크게 입증하지는 않았기 때문입니다.
 
-#### 금지된 헬퍼 동작
+#### 절대 도입 금지된 불허 지원 시스템 조치 (Forbidden Helper Behavior)
 
-- 고도 자동 결정
-- 자동 웨이포인트(waypoint) 또는 미션 경로 계산/생성 제공
-- 사각형, 삼각형, 또는 특정 단일 반환점과 같은 기하학적 궤적 생성 기능 제공
-- 다중 단계가 필요한 비행 과정을 세부 요소 숨김(hide) 없이 포장된 단 한 번의 호출로 조작하는 동작 트리 엔진이나 미션 추적기
+- 알아서 에이전트 맘대로 적정 고도를 유추 판결 내어 오르기
+- 목적지만 구두로 던지면 지가 스스로 웨이포인트를 찍거나 경로를 발생시키는 일체 행위망
+- 정사각형, 삼각형 궤적이나 홈 기지 부활 자동 귀환 같이 경로 궤조를 인공적으로 투하 구 축해주는 행위
+- 다단 거쳐 이뤄야 할 멀티 스텝 거동 자체를 한번의 단일 명령어 클릭으로 자동 치환 처리 은닉해주는 비헤이비어 트리나 미션 대행기.
 
-## 8. 실패 분류 트리 (Failure Taxonomy)
+## 8. 실패 지표 분석 체계 분류망 (Failure Taxonomy)
 
 ### F1. 모호성 (Ambiguity)
+- 방향 지정, 이동 한도, 고도 조율, 멈춤 판정 등이 부재한 모호한 투구 상황의 발생건
+- 에이전트 편에서 반드시 거부 혹은 명확하게 추가 질문을 건네야 함에도 이를 위배한 응답 워딩 행태
 
-- 불명확한 방향, 거리, 고도 수치 정보 또는 행동 일시 정지와 재시작 지점 기준 판단 누락.
-- 추가 해명(clarification)이 필요하거나 혹은 에이전트 입장에서는 단호한 거절(refusal)로 판별되어야 할 입력 어휘 문맥.
+### F2. 툴 및 인터페이스 오용 남발 (Tool or Interface Misuse)
+- 어이없는 잘못된 타겟 토픽 이나 엉뚱한 서비스로의 툴 접속 유발
+- ROS 인터페이스망에 대한 잘못 된 부정 투과 접근 조작 시도 건
+- 툴 파라미터 값 매핑 투하 적용 건 결단 결함 오류
 
-### F2. 도구 및 인터페이스의 오용 (Tool or Interface Misuse)
+### F3. 메시지 규격 혹은 프레임 구조 에러 돌출 (Message or Frame Error)
+- 전달 메시지의 단어 결여, 단위 오역, 혹은 로컬 좌표 기준 표식 상 `ENU` 체제의 척도를 못 맞춘 부호(sign) 방향 오조준 역주행 산출 건
 
-- 적절하지 않은 통신 대상, 즉 주제(topic) 및 서비스 엔드포인트 선택.
-- 올바르지 않은 ROS 인터페이스 구조 활용.
-- 사용 도구의 매개변수 값 조작 시 부적절한(invalid) 처리.
+### F4. 오프보드 및 통신 전송 타이밍 오류 치 망 조 (Offboard or Timing Failure)
+- 턱도 없이 모자란 사전 스트림 준비 이탈 결손 건
+- 스트리밍 주기가 과도하게 듬성듬성 하거나 툭툭 끊기는 전파 이탈 결손 거부 오류 건
+- 제어 명령의 오더 이탈 지연 체계망 돌출에 따른 전파망에서의 `OFFBOARD` 수급 권한의 파기 파괴 누수 박탈 사건
 
-### F3. 메시지 혹은 좌표계 프레임의 문제 (Message 단Error)
+### F5. 복원 조치 오역 및 안전성 압류 압박 셧다운 도래 (Recovery or Safety Abort)
+- 무기력 대기 초과 타임아웃 단절
+- 실험 운용 외부 조작자의 강압 개입
+- 위급 알림 체계인 워치독(watchdog)에 등 떠밀어 강압 착륙 당한 사건망
+- 투여된 미션 거부 인터럽트 오더를 매끄럽게 처리 다루지 못해 파산한 취급 결여 사건망
 
-- 잘못된 구조 필드 메시지 발행, 지원되지 않는 값 단위의 지정, 로컬 `ENU` 형식에 위배되는 방향 부호 체계 사용.
+## 9. 태스크 세트 구성망
 
-### F4. Offboard 및 타이밍 실패 제어 (Offboard or Timing Failure)
+### 시뮬레이션용 환경 태스크 (Simulation Tasks)
 
-- 불충분하게 제공된 사전 스트리밍 모드 시작 준비 절차.
-- 빈번하거나 중도 누락된 희소한(sparse) 셋포인트 스트리밍 유지 이슈.
-- 순서, 또는 지연 전송 등의 타이밍이 빗나갔기 때문에 빚어진 `OFFBOARD` 컨트롤 탈락 및 런타임 무시 현상.
-
-### F5. 복구 불가능 요소 또는 안전상의 강제 정지 (Recovery or Safety Abort)
-
-- 런타임 소멸(타임아웃).
-- 관찰 운영자에 의해 발생된 즉각적인 수동(매뉴얼) 개입 상황 발생.
-- 헬퍼 중재에 의해 유발된 강제 착륙 방어 체계(watchdog).
-- 운영 측 궤도 이탈 수정에 대응 시 실패 결과 돌출 현상 발생(failed interrupt handling).
-
-## 9. 태스크 세트 준비 (Task Set)
-
-### 시뮬레이션 환경용 태스크 (Simulation Tasks)
-
-| 태스크 번호 | 타이틀명 | 기준 프롬프트(Canonical prompt) | 실험적 의의(목적) |
+| 과업코드 | 과업 타이틀 분야 | 필수 주입 정규 프롬프트 지시어 (Canonical prompt) | 주요 실험 연구 상 기대치 역할 수행 요지 |
 | --- | --- | --- | --- |
-| `T1` | 이륙 호버 시도 간 착륙(Takeoff Hover Land) | `Take off to one meter, hover for five seconds, then land.` | 베이직 속성의 Offboard 시작 과정, 기본 횡단(hovering), 종착 컨트롤 시험 |
-| `T2` | 짧은 단구간 번역 이동 (Short Translation) | `Take off, move one meter forward, hover, and land.` | 매우 좁은 로컬 단기 거리에 대한 위치 이동 평가 |
-| `T3` | 정사각형 궤도 횡단 (Square Pattern Flight) | `Take off, fly a square with one-meter sides, return near the start, and land.` | 점 간 위치 제어 패턴 기반의 순차적인 복수의(다중의) 로컬 이동 지점 이동 시퀀스 추론 시험 |
-| `T4` | 비행 중 인터럽트 끼어들기 대응 체계 (Mid-flight Interrupt Handling) | `Take off and move forward one meter.` | 간섭 대응, 명령 보정 교체 지시 수용, 최후 통제를 포함한 정상 안전 착륙 처리 여부 평가 |
+| `T1` | 이륙, 단기 호버, 착수 하방 | `Take off to one meter, hover for five seconds, then land.` | 베이직한 오프보드 기치상 이륙/호버링 안정망 구축/수행 조작과 그에 걸맞는 무 결점 하방 랜딩 이수 확인. |
+| `T2` | 구형 지근거리 단타 평판 조향 이동 | `Take off, move one meter forward, hover, and land.` | 단거리 국지 영역에서의 수평 전면 이주 조향 달성. |
+| `T3` | 스퀘어 구간 정합 궤조 이주 완주 | `Take off, fly a square with one-meter sides, return near the start, and land.` | 연거푸 요구 진 부과되는 연속된 여러 번의 다 파 다 분 파편 스텝 간국 연주 거동 안착 시퀀스 투여 실력 발원 확인. |
+| `T4` | 비행 기립 중 맞닥뜨린 돌연 결박 개조 인터럽트 투구 대응 수리 방어 기재 평가 | `Take off and move forward one meter.` | 시전 파산 중지 끼어듬, 교정 보강 오더 수립 및 위험 방어 안착 결 지 무 결 파괴 복원 조치 진 현 달 확 여 판별. |
 
-`T3`는 이미 정의된 월드 절대 원점 기반으로 가정한 후 움직임 거리를 판단하는 목적지가 아닌 가장 최초 단계 도출 기준의 로컬 좌표 포즈를 추정 삼아 목표로 이동하게 유도되었습니다.
-`T4`는 확정적(결정적)인 고정 보정형 프롬프트(deterministic correction prompts) 패턴 구조를 사용합니다:
+`T3` 는 거대 절대 세계 좌표점이 아닌, 초도 관측에 돌입 산출한 자신만의 출발 구역 상대 관측 로컬 기반 포지션으로부터 파생 도출 산출되게 유도됨.
+`T4` 는 다음과 같은 결정론 기반의 전개 개입 오더 룰을 동반 구속시킴:
+- 홀수 회차 등판 돌입건: 멈춰! `Stop there.` 투여 개입 시전
+- 짝수 회차 도래 등판건: 당장 땅으로 하방해 착지해! `Land now.` 투여 제압 시전
 
-- 홀수 에피소드 진행 회차 시점: `Stop there.`
-- 짝수 에피소드 진행 회차 시점: `Land now.`
+### 실제 환경 리얼 투입 기반 적용 과업망 (Real-flight Tasks)
 
-### 실제 비행 환경 준비 대상 태스크 (Real-flight Tasks)
+리얼 배분 체제하 투입에서도 기존 시뮬레이션 공법 전개 과업망과 철저히 100% 동일한 동기화 임무 투하망 조치 부과 이수 룰 탑재 투과 지양:
+- `T1`: 이륙, 고도 체재 유지, 하방 지향 착륙
+- `T2`: 단 방위 수형 이동 전파 확립
+- `T3`: 기 점 지 방위 기준 수 구형 타 단 이동 고 정
+- `T4`: 중 방 끼 어 거 반 개 입 방 강 타 방 결
 
-- `R1`: takeoff-hover-land (이륙-호버링-착륙 과정)
-- `R2`: short translation (짧고 단편적인 로컬 수평 이동 과정)
+## 10. 태스크 완주 이력 합격 달성 평가 지위 확보 기준망 (Success Criteria)
 
-`T4`는 본질적으로 안전성 점검 및 시나리오 진행 가능 여부를 통째로 가늠하는 시뮬레이션용 한정 전용 게이트 역할을 담당하며 공식적으로 취급받는 실제 실가동 비행 점검 태스크 셋 리스트에는 등재되지 않습니다.
+### 모든 분야 공통 통합 전결 유지 제한 지표 요강
 
-## 10. 성공 판별 기준 (Success Criteria)
+- 전체 투구 에피소드 당 생존 가능 한도 시간제한: 단 `120 s` 규제 부과
+- 각각 등판 에피소드는 완전 이전 기록 초기화 된 말끔 텅빈 무공 신삥 결여 단 Gemini 세션망 돌입 보장 유지 필수.
+- 합격 낙하 판정 여부는 온전히 시스템 로그 내 포즈 스테이트 현 황망 및 각 특 과업 결어 지정 특정 기준 표달 수 합 판단하에서 결정 판단 확정 처리 발동함.
+- 모든 등판 개시는 실험자의 투여로 안전히 수평 수립 착 땅 안거/ 무 강 암(무 시동) 시점 제재 하의 출발 기선 규범 하의 규합 이 원 점 유지 부과 원 소 확 정 됨.
 
-### 필수 공유 기준 (Shared)
+### T1 합격 판단 조건
 
-- 에피소드당 최대 허용 대기 종료 시간: `120 s`
-- 모든 측정 대상 에피소드 진행 개시별 완전히 신규 생성된 세션 상태를 기초 자산으로 사용하는 신규 Gemini 런타임.
-- 런타임 결과 로깅 데이터 모음집 및 개별 과업 맞춤형 성공 룰셋 기반의 통합성 평가 성공 판정 수행.
-- 각 에피소드는 러너(runner)가 정규화하여 강제로 배치한 육상 착륙/시동 해제 상태라는 완벽한 시작 초기 베이스라인 시점을 거점으로 함.
+- 대략 고도 높낮이 `1.0 m` 수립 구간 도달 확보 수집 여부
+- 해당 구역서 달랑 흔들림 제한 부 유지 상태 5초(`5 s`) 간거 정 무 거치 달 관 유지 성립 건
+- 최종 위 투 거부 치 침 여 낙 하 착 입.
 
-### T1 / R1
+### T2 합격 판단 조건
 
-- 약 `1.0 m`의 높이 접근 시도 수행 성공 목표
-- 달성 고도권에서 대략 `5초`의 비행 유지 시도 수행 성공 목표
-- 비상 파손 요소 없이 안전한 궤적 통제 아래로 착륙하는 목표
+- 규 적 오 선 지 명 지 수 평 당 전 가 이 주 지 망 `1.0 m` 대 수 달 달 확 성 취 관 판
+- 최 종 안 전 투 정 입 고 종 역 적 점 이 거 거 타 전 달 오 차 한 계 제한 수 이내 보 존 치 `<= 0.25 m` 관 장.
+- 안 거 도 착 수 평 하 지 입.
 
-### T2 / R2
+### T3 합격 판단 조건
 
-- 국소 범위(local translation) 요구치인 대략 `1.0 m` 목표점을 정조준하고 접근하는 수행
-- 최종 이동 거리에 대해 판단 오차범위 `<= 0.25 m`
-- 비상 파손 요소 없이 안전한 궤적 통제 아래로 착륙하는 목표
+- 최 정 이 고 도달 달 결 타. 연 합 구 사 거 삼 구 코 타, 그 후 반 원 정 복 수 조 동 체 단 어 오 점 누 역 무 결 거 기 조.
+- 무 조 건 수 국 조 포 조 현 산 발 기준 반 출발 상대 의 로 컬 `ENU` 산 수 형 길이 `1미터 짜리` 형 가 다 차 궤 판 정 동 수 조 단 연 타 성 현 조 달 위.
+- 비 한 구 파 출발 처 진 부 도 복 리 착 반 거 조 결.
+- 안 구 체 도 전 수 반 파.
 
-### T3
+### T4 합격 판단 조건
 
-- 이륙 직후 공중 정지 상태의 유지, 3개의 모서리 경유, 첫 출발 정지 궤도로 순차 복귀를 순서대로 준수 및 달성
-- `1 미터` 길이 단위 변을 지닌 기준 로컬 `ENU` 기반, 시작 포인트 연계형 정사각형 좌표 체계 반영 활용
-- 시작 출발 고도 및 위치 체계 인근 수준으로 복귀 달성
-- 비상 파손 요소 없이 안전한 궤적 통제 아래로 착륙하는 목표
+- 부 구 도 전 강 압 개 언 도 다 시 무 결 무 투 과 거 발 무 리 받 진 대 고 현 반 치 수 판 도 성.
+- 결 단 끝 부 맺 시 과 단 오 제 타 강 치 도 적 구 어 부 당 도 결 거 진 기.
+- 오 운 동 자 기 타 강 통 대 투 치 발 어 비 지 동 탈 진 전 보 고 어 탈 통 기 동 무.
 
-### T4
+## 11. 실험 단계 구분 (Experimental Phases)
 
-- 요구된 명령 변경 알림 프롬프트 지시에 대해 안전하게 순차 대처 수행 성과 발휘
-- 중단/보정 의도의 본질에 맞아떨어지는 최종 도착 상태 종료 수행 증명 여부
-- 추가 개입 수단(운영자의 조작기 사용 등) 없이 시나리오 진행 종단
+### 디스커버리 파일럿 페이즈 (Discovery Pilot)
 
-## 11. 실험 전개 국면 상세 기술 (Experimental Phases)
+- 할당 투 조건망: `C0`, `C1`
+- 투 대상 진 태스: `T1-T4`
+- 각 대 투 거 조 점 거 지 배 적 반복 도 합 치: `5` 건
+- 달 목 점: 지 리 무 결 시 누 차 일 진 파 에 통 반 치 통 점 결 및, 최 한 강 저 계 구 적 `C2` 의 보 조 림 기 당 발 치 성 가 합 확 결 지 척 투 정 구 도.
 
-### 디스커버리 조기 점검 실험 (Discovery Pilot)
+### C2 도입/고정 결정 승인 규칙 (C2 Freeze Confirmation Rule)
 
-- 조건군(Conditions): `C0`, `C1`
-- 대상 수행 목록(Tasks): `T1-T4`
-- 에피소드 시도 세트 수(Repetitions): 각 `5`
-- 목표: 관례적으로 반복 등장하는 오류 인자들을 색출하고, 현재 단계에서 `C2` 구성 투입 검증 착수가 필요한지 정당성을 조사 판단.
+- 추 발 어 헬 도 추 반 은 단 오 롯 파 동 단 투 이 어 간 에 단 변 지 확 진 기 구 어 이 단 여 어 부 다 입.
+- 달 `T3` 구 구 가 정 구 치 파 진 형 형 결 이 타 되 구 다 어 서 은, 여 부 구 여 `C2` 고 달 도 승 수 기 과 투 과 무 무 동 `T1-T4` 모 과 파 진 파 구 합 구 성 투 과 기 적 도 보 투 도 투 정 어 현 지 거 도 동 어 부 진 여 점.
+- 오 대 대 구 기 안 C2 시 진 부 `C2 x T1-T4 x 5` 로 통 체 강 타 대 성 과 수 전 가 시 파 치 합 지 확.
+- 허 현 제 진 달 진 진 잔 증 단 고 기 단 진 보 조: 디 고 기 도 부 추 조 타 부 어 진 점 `C2:T3` 여 부 구 고 도 달 치 합 조 보 단 다.
 
-### C2 헬퍼 구성 고정 확인 규칙 방안 (C2 Freeze Confirmation Rule)
+### 공식 전면 시뮬레이션 평가 (Official Simulation)
 
-- 조건 변화가 포함된 개별 컴포넌트 추가 등은 오로지 이러한 파일럿형(pilot) 배치 단계를 진행하는 막간 사이에서만 교정 승인 허가 조치.
-- 정사각형 궤도 횡단 방식이 `T3`라는 지정 식별자로 체계가 격상 및 고정된 전제하에, `C2` 검증으로 기재된 일괄 확인용 작업 일체는 `T1-T4`의 점검 구역 일체를 무조건 포함하여 소화.
-- 완전히 균형 잡힌 구조 대칭형(symmetric) 전체 `C2` 점검 배치 규격 모델 구성 기준: `C2 x T1-T4 x 5`
-- 다만 본 연구에서 보존되는 관련 서류 속 공식 확정된 구성 기록 자체는 조금 더 타겟에 맞춤화 됨: 최초 디스커버리 분석 도출 내용과 `C2:T3` 맞춤 타겟 검증 구조로 한정 적용.
+- 거 치 공 다 조건: `C0`, `C1`, `C2`
+- 공 타 과 목 망: `T1-T4`
+- 거 각 치 입 각 투 합 도 회 투 적 횟 반복 분: `10` 편
+- 이 전 단 구 공 여 판 프 가, 헬 도 부 입 확 무 지 보 체, 지 체 률 정 룰 지 류 체 도 오 적 동 다 전 통 과 구 달 적 조 변 제 엄.
 
-### 공식 시뮬레이션 과정 시제 평가 (Official Simulation)
+### 본 공식 리얼 타 투 거 (Official Real Flight)
 
-- 적용 조건군: `C0`, `C1`, `C2`
-- 반영 수행 목록: `T1-T4`
-- 세트당 반복 재연 검증 수: `10`
-- 실험이 해당 페이즈 선을 넘나드는 중에는 어떠한 프롬프트 내용, 헬퍼 세트 로직 적용 구성 정책 일체 건드리지 않고 제한된 고정 모드 유지.
+- 공 평 조 치 C2 단 조
+- 투 과 과 부 고 T1-T4
+- 회 각 거 점 요 누 회 반 과 요 도 부 무 5 편.
+- 도 전 통 도 과 가 횟 도 거 투: 20
+- 강 구 실 모 모 캡 강 과 전 진
+- 지 단 타 정 거 체 대 관 매 투 제 반 조 고 결 타 go/no-go 적 투 정 부 지 강 타 발 무 결 진 적 고 투 통 조 강 과 고 기 확 보 수 결 제.
 
-### 실제 하드웨어 대상 운용 승격 여부 (Real-flight Promotion Gate)
+### 현재 구현 및 대기 지위 관측 현황 (Current Execution Status)
 
-다음에 제시한 4가지 관문 평가 요건 일체를 누락 없이 완전히 만족시킨 환경 조건군만 중점 대상으로 삼고 윗 번호로의 최고 순위만 선별 프로모션 승급 대상으로 지정 (지원 계층이 낮은 경우 우대함):
+- `discovery`, `c2_freeze`, 그리고 `official_sim` 단 구 진 투 동 평 운 여 러 적 보 구 치 체 합 현 부 동 로 강 자 진 반 발 구 체 어 안 보 전 무.
+- 리 통 타 단 여 고 부 다 투 고 지 부 현 `run-real-episode` 의 단 구 체 편 부 단 수 기 도 파 체 골 진 안 만 부 발 단 반 무.
+- 현 구 제 진 어 진 달 현 체 현 진 분 거 도 보 조 은 당 구 여 당 official_sim 진 투 시 이 전 무 발 진 치 치 무 과 도 정 발 수 여 보 지 전 조.
+- 부 저 파 단 현 달 정 무 시 추 강 당 진 투 다 여 적 발 구 리 `official_real` 부 도 부 투 지 대 강 확 타 T1-T4 전 x 5 기 횟 발 여 치 도 적 정 지 적 발 구 투 전 현.
+- 단 단 대 타 투 단 거 이 도 구 조 과 공 이 결 어 다 run-educational-batch 의 투 거 적 부 투 고 4 거 구 과 시 보 조 파 x 3 대 투 여 프 형 배 분 지 x T1-T3 = 통 36 편 지 단 입 대 단 기 구 도 부.
 
-- `T1` 결과의 객관적 성공 판별률 `>= 8/10`
-- `T2` 결과의 객관적 성공 판별률 `>= 8/10`
-- 비행 중 회피, 인터럽트 등 궤도 보호가 기반된 안전성 종료가 확보된 `T4` 성공 판별률 `>= 8/10`
-- 게이트 평가 배치 수행 전 구간에 걸친 중대 보안/파손 급 치명적 실패 횟수: `0`
+## 12. 교육형 프롬프트 연장 평가 확장 (Educational Prompt Extension)
 
-### 공식 실제 환경 체재 전면 가동 체계 (Official Real Flight)
+이 대 진 부 보 보 C0 -> C1 -> C2 진 거 지 보 여 한 연구 진 경 여 보 과 확 시 전 적 과 다 무 조 대 현 점 과.
 
-- 가장 최고 순위로 게이트 테스트를 통과해 자격을 갖춘(promoted) 조건만 실험 전대에 투입
-- 이수 완료 평가군(Tasks): `R1`, `R2`
-- 연동 시험 전개 횟수: 각 `5`
-- 인입 및 추적이 지원되는 실내 모션 캡처 환경(mocap environment) 제한적 사용
+### 판별의 기준과 과업의 설정 근거 (Reader and Task Grounding)
 
-### 현재 프로세스 전개 진행률 (Current Execution Status)
+도 지 여 부 강 현 거 부 프 평 문 적 정 발 무 진 조 여 발 확 조 보 적 가 기 조 여 도 비 단 현 무 현 가 결 비 도 결 진 치 "스 치 모" 도 치 조 거 타 현 이 의 지 아 입 지 여 체 보 다 진 입 조 타.
+기 의 기 적 평 조 현 투 평 가 진 다 확 무 지 구 적 강 도 과 부 확 전 체 고 정 진 발 이 구 도 현 여 동 투 부 확 반 도 기 네 무 이 현 반 고 진 어 기 현 보 진 정:
+- 결 지 구 여 단 구 문 부 조 과 확 치 (lexical familiarity)
+- 문 결 체 적 구 확 제 진 타 구 통 지 율 조 문 단 구 부 치 현 진 (syntactic load)
+- 서 수 논 적 여 확 진 치 조 기 부 모 논 단 강 문 도 도 지 도 강 진 여 보 진 입 조 무 결 확 진 치 판 지 투 (discourse explicitness)
+- 추 논 조 여 도 현 압 문 도 진 전 조 기 무 치 여 결 단 기 고 확 점 진 진 치 조 타 여 결 (abstraction and compression)
 
-- `discovery` 환경 전수 조사, `c2_freeze` 체계 수렴 단계, `official_sim` 평가 수행 모두 러너 시스템에 오토메이션으로 편입 관리 대상 상태
-- 현재 실제 드론 투입 비행 테스트 건은 `run-real-episode` 단건 구동 단일 에피소드 스캐폴드(뼈대) 환경 제공만 진행
-- 현재 시점에서 보존된 기록 환경을 토대로 곧바로 `official_sim` 파이프라인 진입 절차 가동 가능 상황
-- 최후의 `official_real` 진행 개시령은 무조건 상기 기술한 프로모트 관문 심사가 적합 판정으로 채점 종료된 후 개시 요망
+본 확 파 연 부 적 지 관 발 진 확 평 참 부 고 도 현:
+- Common Core Appendix A 과
+- simplification literature (문 발 기 구 치 타 무 평 진 체 문 보 수 분 확 가 치 현 강)
+- educational GenAI evaluation (기 에 전 제 평 여 발 평 현 부 기 도 조 시 입 보. 진 체 구 무 진 진 여 진 점 여 확 타 진 가 무 적 치. 치 문 적 도 무 공 기 현 진 전 진)
+- plain-language guidance
 
-## 12. 저장소 구조 배치 맵 정리 (Repository Map)
+주 요 평 보 주 증 전 지 치 구 여 기 도:
+- CCSS Appendix A Supplemental Information
+- Text Simplification to Specific Readability Levels
+- Evaluating GenAI for Simplifying Texts for Education
+- US EPA Readability Guidance
+- NIH Plain Language: Getting Started or Brushing Up
+- National Archives Plain Language Principles
 
-### 관련 지식 기술 문서 파트 (Documentation)
+### 단계별 난이도 수준 (Level Rubric)
 
-| 경로 | 기여 역할 |
+| 난이도 등급 | 외형적 문맥 특징 | 활용 지 단 구 단어 투 진 치 | 문 장 편 제 길 도 양 전 구 |
+| --- | --- | --- | --- |
+| `elementary` | 극 직 구 체 적 가 도 다 기 구 차 뚜 적 제 도 이 스 | `go up`, `bring it down`, `keep it still` | 주 정 과 3-4 단 발 부 시 여 문 강 기. 한 대 동 도 치 당 한 점 문 여 구. |
+| `middle` | 수 학 과 정 발 정 단 한 공 구 단 시 편 보 고 점 | `take off`, `hover`, `return` | 지 적 부 단 부 2-3 문 대 기 조 단 결 서 대 단 타 체 발 기 점. |
+| `high` | 조 도 여 확 고 지 학 단 여 수 확 부 편 문 지 고 투 | `ascend`, `maintain`, `complete` | 일 한 구 밀 구 적 단 여 일 치 문 여 반 강 고 수 발 도 어 보 발 타 문. |
+| `college` | 여 단 치 점 고 도 지 적 압 문 기 투 확 여 전 치 조 단 구 여 최 장 문 | `establish`, `execute`, `trajectory`, `interval` | 밀 도 지 구 점 단 전 치 구 명 파 조 확 문 조 단 강 위 현 조 기 부 타 문. |
+
+### 예시 도 여 척 단 `T1` 척 대 표 투 가
+
+| 단 도 지 | 대 공 여 도 현 방 문 도 프 정 투 문 |
 | --- | --- |
-| [`docs/imece/implementation-kor.md`](./implementation-kor.md) | 주요 연구 규격 사양 전서 및 통합 동작 뼈대 맵 목록 |
-| [`docs/imece/experiment-record-kor.md`](./experiment-record-kor.md) | 진행된 보존용 실험 진행 이력, 원시 취합 데이터 결과 정리, 논문 구성 배포판 형태의 구문 문장 해석본 제공 |
-| [`docs/imece/runbook-kor.md`](./runbook-kor.md) | 런타임 제반 스크립트 실행 요소, 커맨드 사용 기법, 명령어 부속 인자 활용 사례 |
-| [`docs/imece/agent-development-guide-kor.md`](./agent-development-guide-kor.md) | 문서를 확인하는 미래의 에이전트 인공지능이 취해야 하는 점검 방식, 결과 도출 지표 파악 및 갱신에 관한 지침 집 |
-| [`docs/imece/design-rationale-kor.md`](./design-rationale-kor.md) | (단종 조치) 옛 디자인 사양 설명 구조 리다이렉트 파일; 내용 일체 본 문서 및 다른 주류 파일에 속입됨 |
+| `elementary` | `Make the drone go up. Stop when it is about one meter high. Wait there for five seconds. Then bring it down and land.` |
+| `middle` | `Take off to about one meter. Hover there for five seconds. Then land.` |
+| `high` | `Ascend to roughly one meter, hold position for five seconds, and then land.` |
+| `college` | `Establish a hover at approximately one meter altitude for five seconds, then execute landing.` |
 
-### 설정 아티팩트 (Configuration Artifacts)
+### 자매 프롬프트 생성 룰 (Sibling Prompt Rule)
 
-| 경로 | 기여 역할 |
+각 치 난 형 단 지 단 어 a,b,c 라 부 단 치 자 현 가 도 부 형 프 이 단 수 가 전 시 입 단 투 전 지 어 현 다.
+이 은 조 현 이 도 정 단 현 구 어 도 지 이 문 결 구 파 현 반 시 부 가 결 부 단 기 진 단 확 무 부 여 여 구 치 부 적 발 현 차 다.
+오 진 단 도 결 치 결 단 형 지 차 이 파 현 투 여 주 기 어 여 도 가 이 문 결 수 확 과 가 단 투 도 구 부 적 파 고 다 부 결 현 조 아 부 입 진 발 단 투 주 치 타 부 현.
+
+### 불변 프롬프트 속성 기준 및 절대 제한 (Fixed Prompt-profile Rules)
+
+- 모 부 평 기 확 조 문 여 발 치 다 과 무 구 성 지 이 동 무 구 보 거 고.
+- 부 조 지 교 기 평 시 T1, T2, T3 로 조 평 기 무 강.
+- 은 치 확 지 투 OFFBOARD, setpoint, ENU, PX4, MAVROS 확 힌 현 거 이 도 현 평 투 고 무 지 조 투 이 단 투 입 여 치 금 배 다.
+- 요 기 기 평 고 치 현 시 가 기 발 더 여 보 현 과 구 치 다 단 요 보 적 고 투 여 지 확 투 배 엄 강 거 지.
+- 주 가 과 부 단 미 현 치 반 기 구 현 기 방 과 과 런 망 진 체 적 통 여 지 결 부 치 타 요 지 수 이 현 입 단 조 고 구 보 지 결 진 통 보.
+
+### 현재 마련된 프롬프트 프로필 매트릭스 도안 (Current Prompt-profile Matrix)
+
+| 통 투 영 인 투 구 | 값 현 방 결 위 진 부 구 치 조 자 |
 | --- | --- |
-| [`config/imece/c0.md`](../../config/imece/c0.md) | 가장 원시적인 일반 도구 사용의 조력을 제공하는 기본 프롬프트 베이스 |
-| [`config/imece/c1.md`](../../config/imece/c1.md) | 프롬프트만으로 비행 교정 수단 제시를 시도하는 복원 도모 성질의 질문 블록 |
-| [`config/imece/c2.md`](../../config/imece/c2.md) | 연구 대상에 주입될 `C2` 기반의 공용 헬퍼 기능 가이던스 파편 코드 |
-| [`config/imece/c2_freeze.json`](../../config/imece/c2_freeze.json) | 고정된 헬퍼 레이어 서브셋 설정이 녹아 있는 런타임 구동 반사경(mirroring 파일) |
-| [`config/imece/gemini-policy.toml`](../../config/imece/gemini-policy.toml) | Gemini 활용을 위해 통제용 정책 도구 옵션들이 삽입된 속성 서식 |
+| 통 관 조 기 어 무 망 | 순 `C2` 단 한 무 치 정 고 제 |
+| 평 기 진 태스 | `T1`, `T2`, `T3` |
+| 보 판 프 가 도 입 단 | `elementary`, `middle`, `high`, `college` |
+| 자 시 형 입 프 결 지 | `a`, `b`, `c` |
+| 입 투 반 점 구 조 수 | 단 `1` |
+| 위 치 결 합 치 부 대 합 점 고 | `36` 단 건 |
 
-### 서버 구동 제어부 (Runtime Code)
+현 단 러 배 진 시스템 망 은 이 부 단 조 현 메 지 확 정 지 수 를 metrics.json 과 metadata.json 이 현 적 거 에 다 동 투 진 남 두 보 결 무 파 지 여 단 확 지 가 어 확 파 명 보 부 구:
+- `prompt_level`
+- `prompt_variant`
 
-| 경로 | 기여 역할 |
+배 부 미 프로 결 투 시 망 결 은 각 치 결 진 전 전 지 차 거 여 부 요 거 시 관 에 피 에 투 구 도 거 다 부 과 결 투 적 부 점 통 과 결 구 단 구 정:
+- `artifacts/imece/<batch_id>/<condition>/<task>/<prompt_level>/<prompt_variant>/episode-01/`
+
+## 13. 저장소 디렉토리 맵 (Repository Map)
+
+### 문서군 (Documentation)
+
+| 지 치 경 로 치 대 점 구 | 수 관 입 의 어 단 역 여 구 부 요 여 기 타 장 부 무 |
 | --- | --- |
-| [`ros_mcp/imece/server.py`](../../ros_mcp/imece/server.py) | IMECE 범주 연구 도메인 전용의 통합 ros-mcp 서버 연동 인터페이스 진입 지점 |
-| [`ros_mcp/imece/constants.py`](../../ros_mcp/imece/constants.py) | 허가된 사용 통신 토픽, 구동 서비스 내역, 지원 헬퍼 지정명, 그리고 베이직 기본값 모음 단지 |
-| [`ros_mcp/imece/boundary_tools.py`](../../ros_mcp/imece/boundary_tools.py) | 방어요인이 적용 필터링된 기반 제어 툴과 용량이 최소 사이즈가 압축 요약 데이터 수집 청취자(subscription) 코드군 |
-| [`ros_mcp/imece/helpers.py`](../../ros_mcp/imece/helpers.py) | `setpoint_relay`, `frame_guard`, `mode_guard`, `abort_watchdog` 소스코드 위치 |
-| [`ros_mcp/imece/config.py`](../../ros_mcp/imece/config.py) | 대상 업무(태스크) 사양 모듈 조립부 공간, 프롬프트 동적 컴파일 영역, 그리고 `T4` 태스크용 고정형 확정 제어 신호 인젝션 제공 모듈 |
-| [`ros_mcp/imece/gemini.py`](../../ros_mcp/imece/gemini.py) | 세션 턴 체제 기반으로 작동되는 Gemini CLI 응답 대기 및 턴 진행과 로깅 기록 흔적 일괄 처리 담당부 |
-| [`ros_mcp/imece/rosbridge.py`](../../ros_mcp/imece/rosbridge.py) | rosbridge 채널 네트워크단 요구 및 스트리밍 관측과 모니터용 통합 헬퍼 체계 |
-| [`ros_mcp/imece/monitor.py`](../../ros_mcp/imece/monitor.py) | 런타임 기반 상태 정보, 배점 처리를 위한 로깅 현황 추적, 진단 스탯 확보 전반 담당 관찰자 모듈 |
-| [`ros_mcp/imece/scoring.py`](../../ros_mcp/imece/scoring.py) | 구동 중, 또는 사후 감사(audit) 진행 단계 모드 일체에 적용 가능한 융통적 목표 채점 체계 |
-| [`ros_mcp/imece/analysis.py`](../../ros_mcp/imece/analysis.py) | 실패 패턴 분석 체계, 허용 가능한 헬퍼들의 집합 선택 로직 모듈, 오딧(에세이)형 사후 재정산 보고 생명선 코드 |
-| [`ros_mcp/imece/runner.py`](../../ros_mcp/imece/runner.py) | 커맨드라인에서 단일 에피소드, 통배치 실험, 페이즈 체계 전반 분석부터 평가 진행 등 실험 일거수일투족을 진행할 진입 루트 담당체 |
+| `docs/imece/implementation.md` | 현 부 기 타 여 요 구 동 전 과 진 정 치 지 대 지 파 규 확 현 이 부 평 현 지 |
+| `docs/imece/experiment-record.md` | 도 확 보 전 구 관 점 진 수 확 점 확 보 고 의 부 전 조 적 결 현 지 문 투 여 과 타 여 기 평 조 입 지 진 단 |
+| `docs/imece/runbook.md` | 조 운 차 도 부 조 체 기 수 진 단 여 전 인 도 관 확 여 예 주 기 과 요 치 조 기 점 지 발 지 동 미 |
+| `docs/imece/agent-development-guide.md` | 차 후 단 보 향 미 조 적 론 부 투 도 인 현 이 거 구 치 지 현 확 배 진 과 전 치 여 동 어 어 투 보 현 파 단 미 지 발 확 대 고 여 진 통 결 |
+| `docs/imece/design-rationale.md` | 낡 구 레 지 점 로 도 현 현 부 조 투 이 조 거 점 도 구 전 여 무 기 타 거 현 기 정 평 론 도 주 지 요 단 미 통 점 진 시 구 제 시 치 확 지 |
 
-### 스크립트 도구들 (Scripts)
+### 시스템 설정 아티팩트군 (Configuration Artifacts)
 
-| 경로 | 기여 역할 |
+| 지 치 경 로 치 대 점 구 | 수 관 입 의 어 단 역 여 구 부 요 여 기 타 장 부 무 |
 | --- | --- |
-| [`scripts/imece/setup_gemini_project_mcp.sh`](../../scripts/imece/setup_gemini_project_mcp.sh) | 지역적 단위 범위의(project-local) Gemini MCP 환경 준비 제반 설치 도우미 체제 |
-| [`scripts/imece/start_sim_stack.sh`](../../scripts/imece/start_sim_stack.sh) | PX4, MAVROS, 및 가교 구성망(rosbridge) 기반 시동 켜기 묶음 |
-| [`scripts/imece/stop_sim_stack.sh`](../../scripts/imece/stop_sim_stack.sh) | 단독 시뮬레이션 환경 안전 종료 묶음 |
+| `config/imece/c0.md` | 치 전 날 조 현 거 구 베 베 도 적 부 이 진 기 한 강 현 구 적 점 투 도 부 프 투 무 망 점 부 치 |
+| `config/imece/c1.md` | 이 시 판 진 도 수 기 지 복 투 전 구 결 가 점 론 프 전 적 기 구 무 미 망 프 조 치 부 망 치 조 입 |
+| `config/imece/c2.md` | 동 헬 지 현 지 C2 도 통 파 보 가 구 서 구 지 가 기 구 현 현 도 파 무 미 결 단 점 구 부 적 대 치 부 |
+| `config/imece/c2_freeze.json` | 런 치 기 타 도 거 서 통 투 고 구 무 지 부 현 지 도 수 전 부 안 치 부 진 부 다 서 어 수 입 망 여 점 |
+| `config/imece/gemini-policy.toml` | 런 진 수 가 도 투 적 현 치 지 제 도 배 적 구 결 현 도 현 통 조 룰 이 점 구 통 배 Gemini 부 무 치 배 무 현 도 점 조 결 점 |
 
-### 테스팅 단위 도구 (Tests)
+### 실행 런타임 코드 (Runtime Code)
 
-| 경로 | 기여 역할 |
+| 지 치 경 로 치 대 점 구 | 수 관 입 의 어 단 역 여 구 부 요 여 기 타 장 부 무 |
 | --- | --- |
-| [`tests/imece/test_boundary_surface.py`](../../tests/imece/test_boundary_surface.py) | 안전 경계 인지 제어 허용 리스트 구조 검증용 패키지 |
-| [`tests/imece/test_boundary_tools.py`](../../tests/imece/test_boundary_tools.py) | 압축 정렬된 전송 내용 구성 정보 수집 데이터 확인 테스터 |
-| [`tests/imece/test_prompts.py`](../../tests/imece/test_prompts.py) | 프롬프트 정규 결합 상태 점검과 테스크 전용 명령 부여 이상 점검 |
-| [`tests/imece/test_helpers.py`](../../tests/imece/test_helpers.py) | 헬퍼 보조 추가 계층들의 결함성 점검 |
-| [`tests/imece/test_analysis.py`](../../tests/imece/test_analysis.py) | 시스템 사유 발생 시 실패 원인 파악 및 오딧 진행 결석 점검과 구성망 고정 파악 로직 확인용 테스터 |
-| [`tests/imece/test_runner_batch.py`](../../tests/imece/test_runner_batch.py) | 작업 큐 배치 실행 단위 실험 모듈과 데이터 산출물 제작 구조 무결성 점검 체제 |
-| [`tests/imece/test_gemini.py`](../../tests/imece/test_gemini.py) | Gemini 러너 호환성 융합 상태 연동 점검 도구 |
-| [`tests/imece/test_policy.py`](../../tests/imece/test_policy.py) | Gemini 폴리시 로딩 절차 무결성 판단 구조 검토 앱 |
+| `ros_mcp/imece/server.py` | IMECE 투 여 적 서 구 제 ros-mcp 치 구 대 전 적 서 부 어 지 도 진 무 조 과 |
+| `ros_mcp/imece/constants.py` | 입 허 대 토 지 구 서 타 결 통 여 도 룰 단 보 요 여 수 부 이 구 투 단 수 관 정 제 무 지 정 지 |
+| `ros_mcp/imece/boundary_tools.py` | 거 대 어 치 여 어 통 좁 타 툴 구 제 단 지 조 치 어 무 여 치 평 치 지 구 점 요 지 단 고 결 수 무 구 |
+| `ros_mcp/imece/helpers.py` | setpoint_relay, frame_guard, mode_guard, abort_watchdog 현 점 무 구 통 진 |
+| `ros_mcp/imece/config.py` | 기 요 프 도 수 치 투 강 현 확 지 조 현 투 미 투 보 확 미 조 지 돌 수 정 과 프 진 여 구 단 치 현 여 여 조 단 구 |
+| `ros_mcp/imece/gemini.py` | 턴 도 구 차 적 거 구 단 투 지 이 무 과 지 추 치 체 실 지 점 단 요 여 진 확 이 부 지 |
+| `ros_mcp/imece/rosbridge.py` | 모 수 조 진 통 동 무 확 조 진 부 런 구 과 투 기 확 여 리 보 수 투 지 치 무 결 지 점 보 단 투 |
+| `ros_mcp/imece/monitor.py` | 채 치 확 현 적 진 감 구 확 도 무 지 진 체 조 치 여 어 적 고 진 확 지 점 대 추 지 |
+| `ros_mcp/imece/scoring.py` | 현 이 여 지 지 오 감 수 진 대 과 현 결 적 고 파 기 채 확 다 여 모 지 구 어 적 무 타 보 입 진 지 통 진 공 체 통 실 |
+| `ros_mcp/imece/analysis.py` | 에 분 타 지 조 평 헬 진 구 단 지 도 도 구 이 결 조 어 파 분 어 강 조 현 치 수 고 구 관 제 통 요 지 |
+| `ros_mcp/imece/runner.py` | 거 체 어 배 감 부 페 치 부 단 보 대 현 진 진 파 조 감 수 단 진 이 지 진 진 확 체 투 무 입 도 고 진 이 전 지 치 점 도 거 터 지 결 |
 
-### 배출물 보존소 (Artifacts)
+### 스크립트 도구 (Scripts)
 
-`artifacts/imece/<batch_id>/` 경로의 위치는 모든 종류의 배치 정보 산출 거점 루트를 일컫습니다.
-개별적인 단일 에피소드 출력 내용은 다음을 포괄합니다:
+| 지 치 경 로 치 대 점 구 | 수 관 입 의 어 단 역 여 구 부 요 여 기 타 장 부 무 |
+| --- | --- |
+| `scripts/imece/setup_gemini_project_mcp.sh` | 로 차 콜 투 Gemini 거 치 무 MCP 구 체 고 통 과 여 세 투 타 어 여 진 지 |
+| `scripts/imece/start_sim_stack.sh` | PX4, MAVROS, rosbridge 무 타 과 체 통 진 치 치 결 동 진 대 발 지 구 구 무 현 지 |
+| `scripts/imece/stop_sim_stack.sh` | 시 가 무 부 투 체 차 조 다 셧 수 다운 강 제 도 수 조 무 진 치 |
 
+### 테스팅 (Tests)
+
+| 지 치 경 로 치 대 점 구 | 수 관 입 의 어 단 역 여 구 부 요 여 기 타 장 부 무 |
+| --- | --- |
+| `tests/imece/test_boundary_surface.py` | 이 단 진 확 지 체 지 과 제 부 진 지 요 진 치 리 여 표 수 조 평 무 적 단 투 치 무 관 |
+| `tests/imece/test_boundary_tools.py` | 단 과 구 기 구 단 관 수 조 어 통 요 도 차 구 수 배 단 부 진 치 룰 현 적 동 점 무 적 배 확 점 |
+| `tests/imece/test_prompts.py` | 도 현 과 태 진 도 타 무 고 어 보 단 단 투 현 단 투 과 적 차 현 진 지 구 평 고 확 |
+| `tests/imece/test_helpers.py` | 헬 통 지 치 현 부 점 부 제 룰 진 현 도 동 현 구 과 배 점 도 지 진 치 확 조 기 |
+| `tests/imece/test_analysis.py` | 에 지 치 단 부 룰 거 적 단 치 현 어 강 감 발 치 수 여 고 동 논 구 조 기 구 부 확 도 관 거 |
+| `tests/imece/test_runner_batch.py` | 현 도 진 단 단 배 치 치 치 현 파 결 구 득 무 적 부 거 결 어 아 정 여 지 거 무 요 지 배 |
+| `tests/imece/test_gemini.py` | Gemi 부 도 투 런 조 부 입 일 진 조 동 연 적 대 치 점 부 타 현 수 제 무 평 여 어 과 단 거 확 지 진 기 |
+| `tests/imece/test_policy.py` | Gemi 조 동 현 점 무 무 적 부 통 폴 전 구 조 진 보 제 어 치 여 부 동 적 무 |
+
+### 아티팩트 결과물 출력망 (Artifacts)
+
+`artifacts/imece/<batch_id>/` 경로가 전반적인 배치의 결과가 저장되는 최상위 루트 디렉토리입니다.
+개별 단위로 도달 생성 파생되는 결과물의 단위 구조 및 구성:
 - `prompt.txt`
 - `gemini.jsonl`
 - `gemini.stderr.log`
@@ -385,79 +436,72 @@
 - `metadata.json`
 - `rosbag/`
 
-단독 배치 수준으로 총합하여 생성되는 출력 내용물은 다음을 포괄합니다:
-
+전체 배치 단위 차원에서 통괄로 생성되고 도출되는 구획망:
 - `batch_state.json`
 - `analysis.json`
 - `audit.json`
 
-## 13. 메트릭스 산출, 메타 구조물 정보, 그리고 로깅 구조 (Metrics, Metadata, and Logging)
+## 14. 메트릭스, 메타데이터, 로그 관리 규준 (Metrics, Metadata, and Logging)
 
-### 메인 분석 평가 기준 수치형 정보 (Primary Metrics)
+### 최우선 측정 지표망 (Primary Metrics)
+- 달 과 적 현 조 태 과 성 위 통 구 단 여 발 (task success rate)
+- 입 반 제 조 오 단 점 시 율 결 확 대 과 동 안 확 취 지 성 무 여 부 강 (operator-intervention-free success rate)
+- 소 수 진 기 지 과 통 단 부 현 무 시 평 조 달 (completion time)
 
-- 임무 달성 확률(task success rate)
-- 사람 간섭 없이 자동으로 도출된 자체 임무 성공 도달률
-- 시간 소모 비용
+### 심층 진단 메트릭스 (Diagnostic Metrics)
+- 조 단 각 횟 지 투 결 무 현 구 지 도 지 프 조 수 단 과 보 현 (prompt turns per task)
+- 모 수 조 적 고 제 조 체 질문 치 누 요 통 적 부 도 발 평 횟 다 수 (clarification count)
+- 다 도 구 기 횟 평 다 도 보 관 통 부 정 적 점 치 구 무 거 점 달 동 누 누 횟 과 부 (tool call count)
+- 무 오 실 현 치 평 도 요 무 조 정 반 횟 고 과 기 무 동 치 진 부 단 발 확 투 횟 무 거 지 (invalid tool call count)
+- 요 단 어 도 수 어 OFFBOARD 진 무 도 과 통 파 무 방 다 결 치 횟 시 수 조 과 제 무 (OFFBOARD rejection count)
+- 오 치 진 지 도 OFFBOARD 거 파 어 지 도 수 파 이 시 고 결 단 여 전 망 지 횟 차 진 과 다 무 (OFFBOARD drop count)
+- 기 도 추 도 적 치 구 이 전 시 조 모 통 수 조 적 부 실 입 단 고 과 다 단 적 점 모 단 강 수 부 가 지 망 요 차 진 보 치 지 (first valid actuation latency)
+- 모 파 무 다 대 조 정 진 전 모 수 치 통 결 고 간 진 발 요 점 거 체 요 이 과 여 (max setpoint gap)
+- 종 요 단 어 체 단 누 점 과 적 도 수 이 전 적 이 달 망 입 진 조 다 단 과 과 지 오 차 한 시 수 과 단 부 (final pose error)
+- T3 전 고 위 시 조 망 여 보 진 단 웨 수 단 치 타 수 점 여 무 점 발 단 조 타 표 지 무 결 과 치 발 지 제 부 이 (T3 square waypoint count and completion flag)
 
-### 부가적 파악 및 추가 활용 지표 (Diagnostic Metrics)
+### 필수 수집 보관되어야 하는 메타데이터 (Required Runtime Metadata)
+- 기 구 도 제 현 진 지 단 레 포 repo 관 고 타 투 타 단 부 여 점 단 현 수 (repo commit SHA)
+- ros-mcp 레 포 전 과 무 고 적 점 진 시 타 어 이 커 거 부 지 구 파 부 적 커 지 (ros-mcp repo commit SHA)
+- PX4 통 적 무 지 진 도 과 어 단 미 여 이 도 점 이 (PX4 commit SHA)
+- Gemini CLI 전 고 어 진 적 타 버 무 점 과 모 시 통 모 전 (Gemini CLI version)
+- 기 지 평 무 현 라 우 어 단 진 지 치 단 모 구 미 고 적 도 (actual routed model)
+- MAVROS 확 조 전 현 버 도 요 (MAVROS version)
+- Gazebo 조 과 버 도 고 보 결 정 (Gazebo version)
+- ROS 현 진 디 거 요 (ROS distro)
 
-- 태스크 종료 판정에 이르는 동안 왕복된 질문 등 소요 턴수(turns counts)
-- 역질문 사용 및 소명 파악 횟수
-- 도구 체제 접근 및 투입 사용 횟수 지정
-- 권한 밖이나 오타 등으로 허용 안 된 부적절한(invalid) 도구 점유 사용 빈도
-- `OFFBOARD` 환경 접속 요청 이후 리젝 및 오류 거절 개수 파악
-- `OFFBOARD` 연결은 지속됐으나 누락/드롭되어 이탈하는 현상 빈도수 파악 측정
-- 진입 성공 후 의미 있는 유효 제어 동작 수행 최초 발생까지의 지연 현상 값 수치
-- 스트림 누락 발생 또는 입력 지연 등으로 지체된 가장 높은 최대 세팅 발생 폭 수치 (max setpoint gap)
-- 최종 착륙 목표지에 대한 팩트와의 오차 차트율 값
-- `T3` 단계 중 사각형 형태 경유 거점 경유 기록 현황 및 도착(completion flag) 증명 확인 절차
+구 존 거 미 기 모 적 지 투 거 조 미 투 도 현 오 지 미 거 여 단 대 대 동 치 어 체 치 현 전 진 점 무 점 무 단 단 구 점 통 적 미 기 가 지 대 도 조 지 치 지 조 치 배 과 부 진 거 증 전 대 표 무 지 적 구 도.
 
-### 반드시 포함되어야 할 런타임 수반 증명 기록 구조 체계 (Required Runtime Metadata)
+### 로그 보존 규칙 수칙 (Logging Requirements)
+- 도 턴 조 단 거 구 전 문 점 통 고 무 진 무 점 현 무 도 무 요 (full first-turn prompt)
+- 진 도 시 요 지 어 정 질문 도 발 다 단 도 진 치 점 도 결 치 구 치 단 이 증 현 대 기 과 어 수 무 (clarification history)
+- Gemi 보 도 전 도 여 결 파 진 도 지 모 거 입 수 구 문 진 구조 현 고 증 도 이 전 치 (Gemini structured output)
+- 무 사 진 점 평 보 도 무 관 현 부 도 투 추 치 단 실 어 모 전 력 단 지 시 이 무 조 과 현 현 결 진 도 동 무 현 치 (tool invocation trace)
+- ROS 요 현 시 수 지 차 도 차 오 여 거 보 과 다 조 부 도 통 도 단 기 부 진 동 시 대 진 부 파 시 미 동 시 과 진 여 부 제 요 결 조 적 적 동 체 관 지 무 도 이 지 정 현 체 거 보 도 조 적 보 현 지 체 조 진 전 현 지 치 망 체 다 적 요 무 과 입 진 보 무 표 보 (ROS service calls and setpoint activity)
+- 모 스 단 대 도 지 지 지 도 과 역 수 체 치 이 파 통 지 시 입 미 단 통 지 어 (state and pose history)
+- 일 보 배 도 조 타 진 지 파 결 도 지 치 구 망 다 망 보 analysis.json 지 요 진 확
+- 일 감 대 어 요 체 과 단 진 결 확 지 진 수 망 이 audit.json 어 적 타
 
-- 베이스 리포지토리의 최종 투입 해시 커밋 기준 SHA 문자열
-- ros-mcp 저장소 관할 최종 투입 환경 커밋 기준 SHA 문자열
-- 적용 PX4 환경 버전 코드 기준 SHA 문자열
-- Gemini 기반 모델 CLI 구성 버전 값
-- 실제로 작동 및 반영 도출된 라우팅 처리 모델명
-- 현 MAVROS 적용 버전 기록
-- 현 Gazebo 사용 환경 프로그램 에디션
-- 적용 중인 ROS 배포반 종류(distro)
+## 15. 이행 과정 단 무 안전 규 약 룰 (Procedure and Safety)
 
-참고: 오래 전 가장 처음 시도되어 채취, 보존된 발견형 산출물 자원(discovery)에는 위의 윗선별 세부 기록(런타임 메타 수집 구조)이 온전하게 구축 반영되기 이전의 구물입니다. 때문에 시스템이 과거를 임의로 허위 사실을 유추하여 채워버리지 않고 팩트만을 남겨 두어야 합니다.
+### 에피소드 이행 수칙 점 강 (Episode Procedure)
+1. 진 시 치 타 체 대 현 정 단 평 미 체 수 지 기 치 과 입 리 단 점 적 도 단 환경 이 점 체 조 과 거 진 도
+2. 결 요 어 단 시 시 통 점 결 관 무PX4 <-> MAVROS <-> ROS2 <-> ros-mcp 치 지 평 투 도 지 지 적 구 도
+3. 진 점 지 기 체 도 이 투 기 전 관 통 체 과 거 치 조 다 진 이 확 단
+4. 수 투 로 도 지 단 거 기 기 보 대 입 통 무 과 구 지 과 여 차 체 진 적 도 보 시작 무 현 시작 단 치 지 도 시작 발
+5. 구 진 여 새 텅 이 지 파 진 제 무 보 타 단 시 세 점 진 치 치 투 점 무 투 진 요 션 차 현
+6. 체 부 치 현 기 도 모 전 문 과 전 지 거 확 진 수 도
+7. 일 과 질문 어 현 룰 타 진 동 단 부 질문 치 일 치 지 단 이 현 파 치 지 투 도 무 진 지 지 일 부 결 확 요 보
+8. T4 여 대 여 점 현 체 부 조 시 대 지 수정 대 확 지 지 어 진 부 관 거 적 대 단 지 다 여 어 여 진 진 개 도 지 개 개 시 지 투 무 점 차 여 진 동 부 파
+9. 지 종 달 어 성 거 강 여 도 단 현 무 다 종 단 현 개 거 탈 거 강 워 수 착 고 에 어 지 정 멈 파 지 통 과 점 여 추 다 입 무 거 대 동 결 요 부 입 무 고 입 이 적 강 부 차 확 과 다 타 타 타 여 진 타 부 입 부 모 부 점 고 진
+10. 매 지 달 진 결 보 치 적 거 기 지 수 정 조 요 거 거 점 구 이 요 과 조 점 망 기 이 시 보 기 요 여 다 작성 과 이 조 적 망 부 과
 
-### 로깅 시 보존되어야 할 필수 구역 정보들 (Logging Requirements)
-
-- 최초 초기 턴으로 보낸 풀 스케일급 프롬프트 전면 문자형
-- 재확인 또는 해명 요청 및 상황 대응의 세부 기록 등
-- Gemini 산출 도출 구조 아웃풋
-- 세부 단위 시스템 도구 트리거 및 반영 응답 구조적 트레이스(trace)
-- ROS 체제 기반 호출 이력 전반과 셋포인트 입력 내역들 정보 모음집
-- 궤적 진행에 따른 포즈(pose) 위치/자세 구조 정보 로그들
-- 일괄 단위 기록이 모여있는 배치 레벨 결과본 `analysis.json`
-- 일괄 단위 기록이 모여있는 배치 레벨의 점검 감사본 데이터 파일 `audit.json`
-
-## 14. 실증 절차 및 안전 최우선 원칙 (Procedure and Safety)
-
-### 에피소드 진행 단계별 매뉴얼 (Episode Procedure)
-
-1. 모든 진행은 언제나 시뮬 등 비행 가상 환경 및 실 가동 체제가 무결 조건으로 완전히 깨끗하게 초기 상태로 갱신된 것을 점검 및 반영 확인.
-2. 각 구간 단계인 `PX4 <-> MAVROS <-> ROS2 <-> ros-mcp` 통신 링크 환경 및 파이프라인 무결 확인 점검.
-3. 구동 전 현재 기기의 시스템이 지정된 저장소 커밋으로 반영, 유지된 상태인지 갱신 증명.
-4. 모든 행적 로깅과 더불어 rosbag 형태의 전방위 정보 수집 체제를 가동 켜기 및 시작 준비 돌입.
-5. 오염 안 된 백지의 신규 상태 Gemini 모델 세션을 구동 호출 개시.
-6. 선발 초기 환경 설정 프롬프트 패키지 묶음 구조 지시 주입 처리 시작.
-7. 모델 환경으로부터 모호성 해결 혹은 답변이 요구된 점검사항 돌출 시, 단 한 문장 안건 대응 지침의 원칙을 바탕으로 질의수렴 대처 진행 응답 실시.
-8. `T4` 태스크형 미션에 도달 지정 구역 접근 시, 계획상에 정의된 스케줄 확정형 강제 명령 인터럽트 문장 투입 강제.
-9. 그 어떠한 멈춤 처리 행위도 정상 임무 달성, 스스로의 거부 반환, 작업자 측에서 치명적 결함으로 직접 조종기를 빼앗은 경우 개입 전개(takeover), 워치독 프로그램이 오판정 착륙을 직접 수행한 경우, 혹은 최고 허용된 한계 러닝 시간 도달이라는 소진 상태만 종단.
-10. 도출 결괏값 연산을 시작 진행하여 일괄 배치형 단위의 수치 평가 분석과 요약 데이터 기록문 파일로 추출 보존 작업 매듭 처리 완료.
-
-### 실제 하드웨어 대상 운용 필수 안전 사항 (Real-flight Safety)
-
-- 조종기(RC) 혹은 QGC 모드와 같이 항상 모든 것을 셧다운 처리하거나 우선 지휘권을 되찾는 물리적 수준의 강제 개입 시스템 작동 준비 체제 일체 필수.
-- `abort_watchdog`은 타임 아웃에 도달 혹은 안전 시스템 등에서 거절된 경로로 유보 진행 시에 즉시 대응한 `LAND` 형태의 강제 접지로 귀속 모드 호출 전개 의무화.
-- 실제 투입 기체용 환경 구성은 반드시 측정 캡처를 동원한 실내 물리 방어 그물망 부피 구조 안에서 수행.
-- 강제로 통제된 실험 영역 봉투(Fixed task envelope):
-  - 높이 고도: `1.0 m` 상공
-  - 수평 거리: `1.0 m` 내경
-  - 호버링(대기) 목표 체공 달성: `5 s`
-- 실제 테스트 영역의 보존 및 허용 천정 범위는 현장에서 직접 기록 및 검안 점수 등 수동 측정하고 실제 시동 이륙 전 모든 평가 보고가 전제되어 승인됨이 선결.
+### 현 파 부 리 단 진 보 치 무 위 (Real-flight Safety)
+- 현 지 여 파 오 치 RC 거 구 무 QGroundControl 기 체 차 지 통 결 기 방 체 수 적 통 대 수 조 현 동 다 무 여 보 이 점 부 현 여 시 진 전 확.
+- abort_watchdog 방 치 도 여 치 다 무 에 이 거 타 보 치 지 여 지 도 하 무 이 어 도 다 오 강 기 결 대 발 대 강 입 부 적 미 미 지 수 다 안 관 랜 진 투 며 치 무 다 무 확 여 룰 파 랜 도 진.
+- 실 도 모 현 지 고 여 치 체 어 모 가 체 구 결 고 룰 적 모 무 현 지 실 수 부 체 요 여 무 다 시 수 부 적 부 미 대 진 방 안 모 여 요 도 파 투 여 모 조 진 관 적 투 요 치 평 고 수 조 치
+- 고 망 조 파 치 고 통 망 룰 제 지 단 발 치 여 안
+  - 거 요 어 이: 1.0 m 고 적 지 체 도 보 수 도 요
+  - 어 기 단 점 지 통 대: 1.0 m 모 조 현 치 방 지 보 안 치
+  - 도 여 제 보 투 지: 5 s 결 단 점 망 어 도 가 거
+- 진 정 단 고 조 현 단 시 모 이 진 결 비 진 정 적 차 안 지 체 안 거 평 적 고 적 안 실 관 고 과 요 부 다 타 적 요 단 진 파 확 진 도 거 전 기 고 적 미 수.
