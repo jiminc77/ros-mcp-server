@@ -1,7 +1,5 @@
 # IMECE Study Specification and Implementation Map
 
-This document is the normative source of truth for the IMECE staged boundary study.
-
 Use this file for:
 
 - the paper's intended argument flow
@@ -14,8 +12,6 @@ Use [`runbook.md`](./runbook.md) for commands and operator steps.
 Use [`agent-development-guide.md`](./agent-development-guide.md) for how future agents should analyze results and update the documentation set.
 
 ## 1. Study Positioning
-
-The study asks a narrow question:
 
 - how far can an off-the-shelf LLM operate a PX4 drone through generic ROS-level tools alone
 - where does prompt-only guidance stop being enough
@@ -44,28 +40,7 @@ The study is therefore not a claim that a generic ROS tool surface is sufficient
 
 - Can the interaction pattern that works in simulation transfer at minimum scale to controlled indoor real flight?
 
-## 3. Claim Boundary and Current Study Status
-
-The current preserved evidence supports the following narrow claims:
-
-- discovery justifies why a frozen `C2` helper subset is needed at all
-- the currently frozen subset is `setpoint_relay`, `mode_guard`, and `abort_watchdog`
-- the remaining `T3` square-pattern gap was validated separately as a targeted `C2` batch
-- the current preserved state is sufficient to begin `official_sim`
-- `official-sim-001` identifies `C2` as the strongest condition to carry forward into the planned real-flight phase
-
-The current preserved evidence does not yet support these stronger claims:
-
-- that `C2` has already been fully validated across the final `T1-T4` task set
-- that real-flight transfer has already been demonstrated
-- that repeated explicit frame/sign failures are part of the preserved freeze rationale
-
-Operationally, the study can proceed as:
-
-1. `official_sim`
-2. `official_real` with `C2` only
-
-## 4. Scope and Boundary
+## 3. Scope and Boundary
 
 ### In Scope
 
@@ -87,7 +62,7 @@ Operationally, the study can proceed as:
 - mission executors, behavior trees, or path generators
 - adaptive memory across official episodes
 
-## 5. Fixed Platform Assumptions
+## 4. Fixed Platform Assumptions
 
 - OS: `Ubuntu 24.04`
 - middleware: `ROS 2 Jazzy`
@@ -98,11 +73,8 @@ Operationally, the study can proceed as:
 - agent runtime: `Gemini CLI`
 
 The official comparison unit is one fresh Gemini CLI session per episode.
-The routed model remains `auto`; the actual routed model must be logged from the episode trace.
 
-## 6. Control Surface Boundary
-
-The study intentionally exposes only an IMECE-scoped subset of ros-mcp.
+## 5. Control Surface Boundary
 
 | Category | Allowed surface | Excluded surface | Why |
 | --- | --- | --- | --- |
@@ -111,14 +83,7 @@ The study intentionally exposes only an IMECE-scoped subset of ros-mcp.
 | Services | `/mavros/set_mode`, `/mavros/cmd/arming` | semantic MAVROS flight services such as takeoff or land | preserves mode-order reasoning and arming responsibility |
 | Generic tool families | topic/service introspection, subscribe, publish, call | actions, parameters, robot-spec tools, unrelated surface | keeps failure attribution interpretable |
 
-The shared generic surface used for future `official_sim` runs is stabilized in only two narrow ways:
-
-- generic tools tolerate stray `wait_for_previous` fields instead of failing on historical schema drift
-- `subscribe_for_duration` returns a compact payload with `first_msg`, `last_msg`, and `summary`
-
-These are interface stabilizations, not semantic flight primitives.
-
-## 7. Conditions
+## 6. Conditions
 
 | Condition | Tool surface | Prompt context | Helper layer | Intended role |
 | --- | --- | --- | --- | --- |
@@ -129,22 +94,20 @@ These are interface stabilizations, not semantic flight primitives.
 ### C0
 
 `C0` must remain runnable, but not informed by drone-operation hints.
-Its condition artifact therefore does only three things:
+Its condition artifact therefore does only two things:
 
-- names the condition
-- restricts the agent to the exposed IMECE tools
+- restricts the agent to the exposed ros-mcp tools
 - tells the agent to inspect the approved surface before acting
 
 This is a runnable baseline, not an impossible blind baseline.
 
 ### C1
 
-`C1` adds exactly five operational facts:
+`C1` adds exactly four operational facts:
 
 - local position is `ENU`
 - `OFFBOARD` requires setpoint prestream before mode switch
 - setpoint streaming must continue during flight
-- ambiguity should trigger one short clarification question
 - final descent should prefer `LAND` mode
 
 `C1` is intentionally not "best possible prompting." It is the smallest allowed prompt-only repair.
@@ -172,14 +135,7 @@ This is a runnable baseline, not an impossible blind baseline.
 
 `frame_guard` remains implemented but is not part of the currently frozen subset because the preserved discovery audit does not show repeated explicit frame/sign failures under the current classifier.
 
-#### Forbidden Helper Behavior
-
-- automatic altitude choice
-- automatic waypoint or mission generation
-- path generators such as square, triangle, or return-home
-- behavior trees or mission executors that hide multi-step flight semantics behind one call
-
-## 8. Failure Taxonomy
+## 7. Failure Taxonomy
 
 ### F1. Ambiguity
 
@@ -209,7 +165,7 @@ This is a runnable baseline, not an impossible blind baseline.
 - watchdog-triggered landing
 - failed interrupt handling
 
-## 9. Task Set
+## 8. Task Set
 
 ### Simulation Tasks
 
@@ -235,7 +191,7 @@ The real-flight phase reuses the same task IDs as simulation:
 - `T3`: Square Pattern Flight
 - `T4`: Mid-flight Interrupt Handling
 
-## 10. Success Criteria
+## 9. Success Criteria
 
 ### Shared
 
@@ -269,7 +225,7 @@ The real-flight phase reuses the same task IDs as simulation:
 - end with behavior matching the interrupt intent
 - avoid operator intervention
 
-## 11. Experimental Phases
+## 10. Experimental Phases
 
 ### Discovery Pilot
 
@@ -309,7 +265,7 @@ The real-flight phase reuses the same task IDs as simulation:
 - the current author-directed next phase is `official_real` with `C2 x T1-T4 x 5`
 - a separate `run-educational-batch` path now automates a `C2`-only simulation sweep over `4` prompt levels x `3` sibling prompts x `T1-T3 = 36` episodes
 
-## 12. Educational Prompt Extension
+## 11. Educational Prompt Extension
 
 This extension is separate from the `C0 -> C1 -> C2` boundary study.
 
@@ -399,7 +355,7 @@ Profiled simulation batches also write episode directories under:
 
 - `artifacts/imece/<batch_id>/<condition>/<task>/<prompt_level>/<prompt_variant>/episode-01/`
 
-## 13. Repository Map
+## 12. Repository Map
 
 ### Documentation
 

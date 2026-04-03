@@ -106,8 +106,6 @@ These matter for `run-batch` and `run-phase`.
 | Command | Argument | Meaning |
 | --- | --- | --- |
 | `analyze-batch` | `--batch-dir` | batch directory to analyze |
-| `analyze-batch` | `--freeze-path` | where to write the freeze mirror if `--write-freeze` is used |
-| `analyze-batch` | `--write-freeze` | sync the discovery helper selection into `c2_freeze.json` |
 | `audit-batch` | `--batch-dir` | batch directory to audit |
 | `audit-batch` | `--write-path` | custom output path for `audit.json` |
 | `plan-study` | `--write-path` | optional output file for the study plan summary |
@@ -129,24 +127,6 @@ What it runs:
 - tasks: `T1`, `T2`, `T3`, `T4`
 - repetitions: `5`
 
-Use discovery to:
-
-- measure the raw baseline and prompt-only repair
-- decide whether `C2` is justified
-- generate helper freeze evidence
-
-### One-off Discovery Episode
-
-```bash
-uv run python -m ros_mcp.imece.runner run-episode \
-  --condition C0 \
-  --task T1 \
-  --episode-index 1 \
-  --batch-id scratch-discovery
-```
-
-Use this only for debugging or ad hoc inspection, not for preserved paper evidence unless the batch is intentionally retained.
-
 ## 7. C2 Freeze
 
 ### Standard Full C2 Freeze Phase
@@ -159,23 +139,6 @@ uv run python -m ros_mcp.imece.runner run-phase c2_freeze \
 ```
 
 This is the symmetric full `C2 x T1-T4 x 5` batch shape.
-
-### Targeted C2 Validation for T3
-
-The current preserved `C2` evidence is narrower and uses a custom batch:
-
-```bash
-uv run python -m ros_mcp.imece.runner run-batch \
-  --conditions C2 \
-  --tasks T3 \
-  --repetitions 5 \
-  --batch-id c2-freeze-t3-001 \
-  --resume \
-  --retry-at-end \
-  --max-attempts 3
-```
-
-Use this targeted form only when the goal is explicitly to validate the remaining `T3` gap under the already frozen subset.
 
 ## 8. Official Simulation
 
@@ -192,16 +155,7 @@ What it runs:
 - tasks: `T1`, `T2`, `T3`, `T4`
 - repetitions: `10`
 
-Before running `official_sim`, make sure:
-
-- the frozen subset is the intended one in `config/imece/c2_freeze.json`
-- the prompt and policy files are fixed
-- the documentation already states the current evidence honestly
-
 ## 9. Official Real Flight
-
-There is no batch-level `official_real` phase command yet.
-Current real flight is one episode at a time, but the intended preserved matrix is:
 
 - condition: `C2`
 - tasks: `T1`, `T2`, `T3`, `T4`
@@ -341,7 +295,7 @@ Each episode writes:
 - `metadata.json`
 - `rosbag/`
 
-## 13. What to Check After a Run
+## 14. What to Check After a Run
 
 ### First Check
 
@@ -370,7 +324,7 @@ Each episode writes:
 - `prompt.txt`
 - `gemini.jsonl`
 
-## 14. Resume and Retry Behavior
+## 15. Resume and Retry Behavior
 
 - `--resume` skips completed episodes and continues from `batch_state.json`
 - task failures remain task failures
@@ -380,7 +334,7 @@ Each episode writes:
 
 This separation matters. Control failures are evidence. Connector or execution-transport failures are retry candidates.
 
-## 15. Current Assumptions
+## 16. Current Assumptions
 
 - the current frozen `C2` subset is `setpoint_relay`, `mode_guard`, `abort_watchdog`
 - `abort_watchdog` is runtime behavior, not an agent-callable semantic tool

@@ -2,15 +2,7 @@
 
 This document records what was actually run, what was preserved, how those artifacts were analyzed, and what paper claims are supported by the preserved evidence.
 
-Use this file for:
-
-- preserved batch history
-- the exact condition and prompt setup used in preserved evidence
-- machine-generated summaries and how they should be read
-- paper-safe result statements and current limitations
-
 [`implementation.md`](./implementation.md) remains the normative specification.
-If the two documents diverge, this file should explain the preserved reality and `implementation.md` should explain the intended rule.
 
 ## 1. Preserved Evidence Boundary
 
@@ -19,13 +11,8 @@ The following preserved batches are the current paper-facing evidence:
 | Batch ID | Phase meaning | Preserved purpose | Artifact root |
 | --- | --- | --- | --- |
 | `discovery-20260331` | discovery pilot | determine whether `C2` is needed and which helpers can be frozen | `artifacts/imece/discovery-20260331/` |
-| `c2-freeze-t3-20260331` | targeted `C2` validation | validate the remaining `T3` square-pattern gap under the frozen `C2` subset | `artifacts/imece/c2-freeze-t3-20260331/` |
 | `official-sim-001` | official simulation evaluation | compare `C0`, `C1`, and `C2` head-to-head on the final `T1-T4` task set | `artifacts/imece/official-sim-001/` |
 | `educational-sim-001` | educational prompt-profile evaluation | test whether the frozen `C2` interface remains robust across `T1-T3` when the same tasks are written at clearly different student reading levels | `artifacts/imece/educational-sim-001/` |
-
-These are the only preserved batches that should be cited as direct evidence in the paper right now.
-
-Deleted ad hoc runs and superseded internal runs are not part of the paper-facing argument and should not be reconstructed into tables or claims.
 
 ## 2. Machine-generated Analysis Outputs
 
@@ -43,7 +30,6 @@ Each preserved batch has:
 Important differences across preserved batches:
 
 - preserved discovery predates top-level runtime metadata capture
-- preserved `c2-freeze-t3-20260331` has complete per-episode `runtime_metadata`
 - preserved `official-sim-001` has complete per-episode `runtime_metadata` and no historical interface mismatch contamination
 - preserved `educational-sim-001` has complete per-episode `runtime_metadata`, no historical interface mismatch contamination, and one recovered invalid tool call inside an otherwise successful episode
 
@@ -73,16 +59,6 @@ Important differences across preserved batches:
   - prompt levels: `elementary`, `middle`, `high`, `college`
   - sibling prompts: `a`, `b`, `c`
   - total `36` episodes
-
-### Historical Note
-
-An earlier ambiguity-oriented draft task was retired.
-The preserved final mapping is:
-
-- `T3 = Square Pattern Flight`
-- `T4 = Mid-flight Interrupt Handling`
-
-The paper should use only this final mapping.
 
 ## 4. Condition Record
 
@@ -183,8 +159,7 @@ For educational prompt batches, the runner keeps the same shared contract and ta
 
 Across the preserved runs, the first-turn prompt keeps these shared requirements:
 
-- use only the exposed IMECE tools
-- ask one short clarification question if necessary
+- use only the exposed ros-mcp tools
 - refuse briefly if the request cannot be completed safely
 - end every turn with exactly one of `CLARIFY: ...`, `REFUSE: ...`, or `DONE: ...`
 
@@ -332,11 +307,6 @@ Reproducibility result:
 - episodes with runtime metadata: `5`
 - episodes missing runtime metadata: `[]`
 - full field coverage for repo commit, ros-mcp repo commit, PX4 commit, Gemini CLI version, routed model, MAVROS version, Gazebo version, and ROS distro
-
-Validation conclusion:
-
-- the frozen `C2` subset closes the remaining preserved `T3` gap
-- this is a targeted validation result, not a claim of full `C2:T1-T4` validation
 
 ### Phase C. Official Simulation
 
@@ -525,6 +495,7 @@ What this batch does not support by itself:
 - a claim that there is a measurable performance ranking among the four reading levels
 - a claim that educational prompt variation is zero-error under all circumstances
 - any real-flight educational transfer claim
+
 
 ## 8. Analysis Method Used on Preserved Artifacts
 
